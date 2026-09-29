@@ -6,8 +6,10 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+    path: Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity
+    guid: ae16521ed8e8943d1ae34a8bb3f8220b
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 4ceef67723e524679b59ff3e83be1f35, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: ff810a5ebcf2141819602402624f21e5, type: 2}
   m_UseUCBPForAssetBundles: 0
