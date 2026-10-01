@@ -109,3 +109,6 @@ __MACOSX/
 # "Icon?" above also matches folders named "Icons" (like Assets/TutorialInfo/Icons).
 # This line keeps those folders in Git.
 !Icons/
+*_BurstDebugInformation_DoNotShip/
+*_BackUpThisFolder_ButDontShipItWithYourGame/
+*.apk
