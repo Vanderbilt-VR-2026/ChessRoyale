@@ -24,6 +24,13 @@
 # Uncomment this line to ignore the Asset Store Tools plugin
 # /[Aa]ssets/AssetStoreTools*
 
+# Licensed Unity Asset Store source files must not be redistributed in this
+# public repository. Install these packages locally as described in SETUP.md.
+/Assets/Chess MEGA-pack/
+/Assets/Chess MEGA-pack.meta
+/Assets/Creepy_Cat/
+/Assets/Creepy_Cat.meta
+
 # JetBrains Rider
 /[Aa]ssets/Plugins/Editor/JetBrains*
 *.DotSettings.user
@@ -63,6 +70,10 @@ mono_crash.*
 *.unitypackage
 *.unitypackage.meta
 *.app
+
+# Unity IL2CPP/Burst companion output generated beside a player build
+/*_BackUpThisFolder_ButDontShipItWithYourGame/
+/*_BurstDebugInformation_DoNotShip/
 
 # Crashlytics
 crashlytics-build.properties
