@@ -66,6 +66,7 @@ mono_crash.*
 
 # Builds
 *.apk
+!ChessRoyale.apk
 *.aab
 *.unitypackage
 *.unitypackage.meta
