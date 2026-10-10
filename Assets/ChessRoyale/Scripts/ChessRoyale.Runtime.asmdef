@@ -1,0 +1,8 @@
+{
+  "name": "ChessRoyale.Runtime",
+  "rootNamespace": "ChessRoyale",
+  "references": [
+    "Unity.XR.Interaction.Toolkit"
+  ],
+  "autoReferenced": true
+}

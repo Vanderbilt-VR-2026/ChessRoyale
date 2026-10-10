@@ -1,0 +1,12 @@
+{
+  "name": "ChessRoyale.EditModeTests",
+  "references": [
+    "ChessRoyale.Runtime"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ]
+}

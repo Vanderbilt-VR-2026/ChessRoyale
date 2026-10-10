@@ -21,6 +21,7 @@ namespace ChessRoyale.Editor
     public static class ChessRoyaleSceneBuilder
     {
         private const string ScenePath = "Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity";
+        private const string MainMenuScenePath = "Assets/ChessRoyale/Scenes/MainMenu.unity";
         private const float BoardCenterZ = 2f;
         private const float BoardTop = 0.42f;
         private const float SquareSize = 2f;
@@ -50,15 +51,21 @@ namespace ChessRoyale.Editor
             CreateSciFiArena();
             CreateBoard();
             CreatePieces();
+            CreateChessClocks();
             CreateResetPedestal();
             CreateXRPlayer();
             CreateInstructions();
 
             EditorSceneManager.SaveScene(scene, ScenePath);
-            EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
+            BuildMainMenuScene();
+            EditorBuildSettings.scenes = new[]
+            {
+                new EditorBuildSettingsScene(MainMenuScenePath, true),
+                new EditorBuildSettingsScene(ScenePath, true)
+            };
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            Debug.Log($"ChessRoyale: built playable VR scene at {ScenePath}");
+            Debug.Log($"ChessRoyale: built VR menu and playable scene at {ScenePath}");
         }
 
         private static void ValidateRequiredAssets()
@@ -274,9 +281,12 @@ namespace ChessRoyale.Editor
                     GameObject square = GameObject.CreatePrimitive(PrimitiveType.Cube);
                     square.name = $"Square {char.ConvertFromUtf32('A' + file)}{rank + 1}";
                     square.transform.SetParent(squares.transform, true);
-                    square.transform.position = new Vector3(-7f + file * SquareSize, BoardTop - 0.06f, -5f + rank * SquareSize);
-                    square.transform.localScale = new Vector3(1.94f, 0.12f, 1.94f);
+                    // Keep the checker surface visibly above the imported platform instead of
+                    // coplanar with its top mesh, which caused flicker or hid the pattern.
+                    square.transform.position = new Vector3(-7f + file * SquareSize, BoardTop + 0.015f, -5f + rank * SquareSize);
+                    square.transform.localScale = new Vector3(1.94f, 0.08f, 1.94f);
                     square.GetComponent<Renderer>().sharedMaterial = (file + rank) % 2 == 0 ? boardLightMaterial : boardDarkMaterial;
+                    square.AddComponent<BoardSquare>().Configure(file, rank);
                 }
             }
 
@@ -365,6 +375,96 @@ namespace ChessRoyale.Editor
                 case "rook": return 1.65f;
                 default: return 1.45f;
             }
+        }
+
+        private static void CreateChessClocks()
+        {
+            GameObject clockObject = new GameObject("Chess Clock");
+            ChessClock clock = clockObject.AddComponent<ChessClock>();
+
+            TextMesh whiteNorth = CreateClockDisplay("White Clock — North", new Vector3(-5.5f, 3.35f, 12.4f), Quaternion.Euler(0f, 180f, 0f), cyanMaterial);
+            TextMesh whiteSouth = CreateClockDisplay("White Clock — South", new Vector3(5.5f, 3.35f, -8.4f), Quaternion.identity, cyanMaterial);
+            TextMesh blackNorth = CreateClockDisplay("Black Clock — North", new Vector3(5.5f, 3.35f, 12.4f), Quaternion.Euler(0f, 180f, 0f), magentaMaterial);
+            TextMesh blackSouth = CreateClockDisplay("Black Clock — South", new Vector3(-5.5f, 3.35f, -8.4f), Quaternion.identity, magentaMaterial);
+
+            clock.Configure(300f, new[] { whiteNorth, whiteSouth }, new[] { blackNorth, blackSouth });
+        }
+
+        private static TextMesh CreateClockDisplay(string name, Vector3 position, Quaternion rotation, Material backingMaterial)
+        {
+            GameObject backing = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            backing.name = name;
+            backing.transform.SetPositionAndRotation(position, rotation);
+            backing.transform.localScale = new Vector3(4.2f, 1.65f, 0.18f);
+            backing.GetComponent<Renderer>().sharedMaterial = backingMaterial;
+
+            GameObject label = new GameObject("Time");
+            label.transform.SetParent(backing.transform, false);
+            label.transform.localPosition = new Vector3(0f, 0f, -0.56f);
+            label.transform.localRotation = Quaternion.identity;
+            label.transform.localScale = new Vector3(0.24f, 0.6f, 1f);
+            TextMesh text = label.AddComponent<TextMesh>();
+            text.text = "05:00";
+            text.alignment = TextAlignment.Center;
+            text.anchor = TextAnchor.MiddleCenter;
+            text.characterSize = 0.5f;
+            text.fontSize = 72;
+            text.color = Color.white;
+            return text;
+        }
+
+        private static void BuildMainMenuScene()
+        {
+            Scene menuScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            CreateLighting();
+
+            GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            floor.name = "SCI-FI MENU PLATFORM";
+            floor.transform.position = new Vector3(0f, -0.15f, 0f);
+            floor.transform.localScale = new Vector3(18f, 0.3f, 18f);
+            floor.GetComponent<Renderer>().sharedMaterial = sciFiMaterial;
+
+            GameObject interactionManager = new GameObject("XR Interaction Manager");
+            interactionManager.AddComponent<XRInteractionManager>();
+            GameObject rig = InstantiatePrefab(LoadPrefab(XrRigPath), null, "XR Origin — Menu");
+            rig.transform.position = Vector3.zero;
+
+            TextMesh title = CreateWorldText("Title", "CHESS ROYALE", new Vector3(0f, 4.2f, 5.8f), 0.18f, 86);
+            title.color = new Color(0.55f, 0.92f, 1f);
+            TextMesh status = CreateWorldText("Load Status", "SELECT START", new Vector3(0f, 2.7f, 5.75f), 0.1f, 54);
+
+            CreateMenuPedestal("START GAME", new Vector3(-2.6f, 0.7f, 3.2f), cyanMaterial, false, status);
+            CreateMenuPedestal("QUIT", new Vector3(2.6f, 0.7f, 3.2f), magentaMaterial, true, status);
+
+            EditorSceneManager.SaveScene(menuScene, MainMenuScenePath);
+        }
+
+        private static void CreateMenuPedestal(string labelText, Vector3 position, Material material, bool quit, TextMesh status)
+        {
+            GameObject pedestal = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            pedestal.name = labelText;
+            pedestal.transform.position = position;
+            pedestal.transform.localScale = new Vector3(1.5f, 0.7f, 1.5f);
+            pedestal.GetComponent<Renderer>().sharedMaterial = material;
+            pedestal.AddComponent<XRSimpleInteractable>();
+            pedestal.AddComponent<MainMenuController>().Configure(quit, status);
+
+            TextMesh label = CreateWorldText($"{labelText} Label", labelText, position + Vector3.up * 1.45f, 0.12f, 54);
+            label.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+        }
+
+        private static TextMesh CreateWorldText(string name, string value, Vector3 position, float characterSize, int fontSize)
+        {
+            GameObject textObject = new GameObject(name);
+            textObject.transform.position = position;
+            TextMesh text = textObject.AddComponent<TextMesh>();
+            text.text = value;
+            text.alignment = TextAlignment.Center;
+            text.anchor = TextAnchor.MiddleCenter;
+            text.characterSize = characterSize;
+            text.fontSize = fontSize;
+            text.color = Color.white;
+            return text;
         }
 
         private static void CreateResetPedestal()
