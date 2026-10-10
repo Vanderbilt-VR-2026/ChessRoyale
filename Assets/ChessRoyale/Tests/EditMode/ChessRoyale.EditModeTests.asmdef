@@ -1,7 +1,8 @@
 {
   "name": "ChessRoyale.EditModeTests",
   "references": [
-    "ChessRoyale.Runtime"
+    "ChessRoyale.Runtime",
+    "Unity.XR.Interaction.Toolkit"
   ],
   "optionalUnityReferences": [
     "TestAssemblies"

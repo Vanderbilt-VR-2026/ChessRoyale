@@ -38,26 +38,52 @@ namespace ChessRoyale.Editor
         private static Material sciFiMaterial;
         private static Material boardLightMaterial;
         private static Material boardDarkMaterial;
+        private static ChessBoardController boardController;
 
         [MenuItem("Tools/Chess Royale/Build VR Scene")]
         public static void BuildScene()
         {
+            PrepareBuild();
+            BuildPlayableScene();
+            BuildMainMenuScene();
+            FinishBuild();
+            Debug.Log($"ChessRoyale: built VR menu and playable scene at {ScenePath}");
+        }
+
+        [MenuItem("Tools/Chess Royale/Rebuild Game Scene Only")]
+        public static void RebuildGameSceneOnly()
+        {
+            PrepareBuild();
+            BuildPlayableScene();
+            FinishBuild();
+            Debug.Log($"ChessRoyale: rebuilt playable scene at {ScenePath}");
+        }
+
+        private static void PrepareBuild()
+        {
             ValidateRequiredAssets();
             ConfigureOpenXR();
-
-            Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             CreateMaterials();
+        }
+
+        private static void BuildPlayableScene()
+        {
+            Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             CreateLighting();
             CreateSciFiArena();
+            GameObject gameplayRoot = new GameObject("CHESS GAMEPLAY");
+            boardController = gameplayRoot.AddComponent<ChessBoardController>();
             CreateBoard();
             CreatePieces();
             CreateChessClocks();
             CreateResetPedestal();
             CreateXRPlayer();
             CreateInstructions();
-
             EditorSceneManager.SaveScene(scene, ScenePath);
-            BuildMainMenuScene();
+        }
+
+        private static void FinishBuild()
+        {
             EditorBuildSettings.scenes = new[]
             {
                 new EditorBuildSettingsScene(MainMenuScenePath, true),
@@ -65,7 +91,6 @@ namespace ChessRoyale.Editor
             };
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            Debug.Log($"ChessRoyale: built VR menu and playable scene at {ScenePath}");
         }
 
         private static void ValidateRequiredAssets()
@@ -273,7 +298,7 @@ namespace ChessRoyale.Editor
             ApplyMaterial(board, sciFiMaterial);
 
             GameObject squares = new GameObject("64 Playable Board Squares");
-            squares.transform.SetParent(board.transform.parent, true);
+            squares.transform.SetParent(boardController.transform, true);
             for (int rank = 0; rank < 8; rank++)
             {
                 for (int file = 0; file < 8; file++)
@@ -302,19 +327,20 @@ namespace ChessRoyale.Editor
         private static void CreatePieces()
         {
             GameObject piecesRoot = new GameObject("HUMAN-SIZED INTERACTIVE CHESS PIECES");
+            piecesRoot.transform.SetParent(boardController.transform, true);
             string[] order = { "rook", "knight", "bishop", "queen", "king", "bishop", "knight", "rook" };
 
             for (int file = 0; file < 8; file++)
             {
                 float x = -7f + file * SquareSize;
-                CreatePiece(order[file], false, new Vector3(x, BoardTop, -5f), piecesRoot.transform, file);
-                CreatePiece("pawn", false, new Vector3(x, BoardTop, -3f), piecesRoot.transform, file);
-                CreatePiece("pawn", true, new Vector3(x, BoardTop, 7f), piecesRoot.transform, file);
-                CreatePiece(order[file], true, new Vector3(x, BoardTop, 9f), piecesRoot.transform, file);
+                CreatePiece(order[file], false, new Vector3(x, BoardTop, -5f), piecesRoot.transform, file, 0);
+                CreatePiece("pawn", false, new Vector3(x, BoardTop, -3f), piecesRoot.transform, file, 1);
+                CreatePiece("pawn", true, new Vector3(x, BoardTop, 7f), piecesRoot.transform, file, 6);
+                CreatePiece(order[file], true, new Vector3(x, BoardTop, 9f), piecesRoot.transform, file, 7);
             }
         }
 
-        private static void CreatePiece(string type, bool black, Vector3 boardPosition, Transform parent, int file)
+        private static void CreatePiece(string type, bool black, Vector3 boardPosition, Transform parent, int file, int rank)
         {
             string suffix = black ? " 1" : string.Empty;
             string path = $"{ChessRoot}/prefabs/pieces/LowPoly1/{type}LowPoly1{suffix}.prefab";
@@ -347,8 +373,10 @@ namespace ChessRoyale.Editor
             if (body == null)
                 body = piece.AddComponent<Rigidbody>();
             body.mass = 18f;
+            body.isKinematic = true;
+            body.useGravity = false;
             body.interpolation = RigidbodyInterpolation.Interpolate;
-            body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            body.collisionDetectionMode = CollisionDetectionMode.Discrete;
             body.linearDamping = 1.5f;
             body.angularDamping = 3f;
 
@@ -361,7 +389,22 @@ namespace ChessRoyale.Editor
             grab.trackRotation = true;
             grab.throwOnDetach = false;
 
+            ChessPieceState state = piece.AddComponent<ChessPieceState>();
+            state.Configure(black ? ChessSide.Black : ChessSide.White, ParsePieceType(type), file, rank);
             piece.AddComponent<ChessPieceInteractable>();
+        }
+
+        private static ChessPieceType ParsePieceType(string type)
+        {
+            return type switch
+            {
+                "king" => ChessPieceType.King,
+                "queen" => ChessPieceType.Queen,
+                "bishop" => ChessPieceType.Bishop,
+                "knight" => ChessPieceType.Knight,
+                "rook" => ChessPieceType.Rook,
+                _ => ChessPieceType.Pawn
+            };
         }
 
         private static float TargetHeight(string type)
@@ -475,7 +518,7 @@ namespace ChessRoyale.Editor
             pedestal.transform.localScale = new Vector3(1.2f, 0.65f, 1.2f);
             pedestal.GetComponent<Renderer>().sharedMaterial = magentaMaterial;
             pedestal.AddComponent<XRSimpleInteractable>();
-            pedestal.AddComponent<ChessBoardReset>();
+            pedestal.AddComponent<ChessBoardReset>().Configure(boardController);
 
             GameObject label = new GameObject("Reset Label");
             label.transform.SetParent(pedestal.transform, false);

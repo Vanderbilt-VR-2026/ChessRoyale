@@ -22,6 +22,7 @@ namespace ChessRoyale
 
         public int File => file;
         public int Rank => rank;
+        public BoardCoordinate Coordinate => new(file, rank);
         public string AlgebraicName => $"{(char)('A' + file)}{rank + 1}";
         public Vector3 SnapPosition => transform.position + Vector3.up * transform.lossyScale.y * 0.5f;
 

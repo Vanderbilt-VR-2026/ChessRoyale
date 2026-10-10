@@ -4,75 +4,104 @@ using UnityEngine.XR.Interaction.Toolkit.Interactables;
 
 namespace ChessRoyale
 {
-    [RequireComponent(typeof(Rigidbody), typeof(XRGrabInteractable))]
+    [RequireComponent(typeof(Rigidbody), typeof(XRGrabInteractable), typeof(ChessPieceState))]
     public sealed class ChessPieceInteractable : MonoBehaviour
     {
-        [SerializeField] private float squareSize = 2f;
-        [SerializeField] private Vector2 boardCenter = new Vector2(0f, 2f);
-        [SerializeField] private float boardHalfExtent = 8f;
-        [SerializeField] private float boardTop = 0.42f;
-
         private XRGrabInteractable grabInteractable;
         private Rigidbody body;
-        private Vector3 startingPosition;
-        private Quaternion startingRotation;
+        private ChessPieceState state;
+        private ChessBoardController board;
         private float baseOffset;
+
+        public ChessPieceState State
+        {
+            get
+            {
+                EnsureComponents();
+                return state;
+            }
+        }
 
         private void Awake()
         {
-            grabInteractable = GetComponent<XRGrabInteractable>();
-            body = GetComponent<Rigidbody>();
-            startingPosition = transform.position;
-            startingRotation = transform.rotation;
+            EnsureComponents();
             baseOffset = CalculateBaseOffset();
+            body.isKinematic = true;
+            body.useGravity = false;
         }
 
         private void OnEnable()
         {
             grabInteractable.selectExited.AddListener(OnReleased);
+            grabInteractable.selectEntered.AddListener(OnGrabbed);
         }
 
         private void OnDisable()
         {
             grabInteractable.selectExited.RemoveListener(OnReleased);
+            grabInteractable.selectEntered.RemoveListener(OnGrabbed);
         }
 
         private void Update()
         {
-            if (transform.position.y < -3f)
+            if (board != null && transform.position.y < -3f)
                 ResetToStart();
+        }
+
+        private void OnGrabbed(SelectEnterEventArgs _)
+        {
+            board ??= GetComponentInParent<ChessBoardController>();
+            board?.BeginMove(this);
         }
 
         private void OnReleased(SelectExitEventArgs _)
         {
-            Vector3 position = transform.position;
-            float minX = boardCenter.x - boardHalfExtent + squareSize * 0.5f;
-            float minZ = boardCenter.y - boardHalfExtent + squareSize * 0.5f;
-            float maxX = boardCenter.x + boardHalfExtent - squareSize * 0.5f;
-            float maxZ = boardCenter.y + boardHalfExtent - squareSize * 0.5f;
-
-            position.x = Mathf.Clamp(
-                minX + Mathf.Round((position.x - minX) / squareSize) * squareSize,
-                minX,
-                maxX);
-            position.z = Mathf.Clamp(
-                minZ + Mathf.Round((position.z - minZ) / squareSize) * squareSize,
-                minZ,
-                maxZ);
-            position.y = boardTop + baseOffset;
-
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
-            body.position = position;
-            body.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
+            board ??= GetComponentInParent<ChessBoardController>();
+            if (board == null || !board.TryPlace(this, transform.position))
+                ResetToCurrentSquare();
         }
 
         public void ResetToStart()
         {
+            state.ResetState();
+            board ??= GetComponentInParent<ChessBoardController>();
+            SnapTo(board != null ? board.GetSquare(state.StartingSquare) : null);
+        }
+
+        public void ResetToCurrentSquare()
+        {
+            board ??= GetComponentInParent<ChessBoardController>();
+            SnapTo(board != null ? board.GetSquare(state.CurrentSquare) : null);
+        }
+
+        public void SnapTo(BoardSquare square)
+        {
+            EnsureComponents();
+            if (square == null)
+                return;
+
             body.linearVelocity = Vector3.zero;
             body.angularVelocity = Vector3.zero;
-            body.position = startingPosition;
-            body.rotation = startingRotation;
+            body.position = square.SnapPosition + Vector3.up * baseOffset;
+            body.rotation = Quaternion.Euler(0f, state.Side == ChessSide.Black ? 180f : 0f, 0f);
+        }
+
+        public void SetBoard(ChessBoardController controller)
+        {
+            board = controller;
+        }
+
+        public void SetInteractionEnabled(bool enabled)
+        {
+            EnsureComponents();
+            grabInteractable.enabled = enabled;
+        }
+
+        private void EnsureComponents()
+        {
+            grabInteractable ??= GetComponent<XRGrabInteractable>();
+            body ??= GetComponent<Rigidbody>();
+            state ??= GetComponent<ChessPieceState>();
         }
 
         private float CalculateBaseOffset()

@@ -8,6 +8,7 @@ namespace ChessRoyale
     public sealed class ChessBoardReset : MonoBehaviour
     {
         private XRSimpleInteractable interactable;
+        [SerializeField] private ChessBoardController board;
 
         private void Awake()
         {
@@ -31,8 +32,13 @@ namespace ChessRoyale
 
         public void ResetAllPieces()
         {
-            foreach (ChessPieceInteractable piece in FindObjectsByType<ChessPieceInteractable>(FindObjectsSortMode.None))
-                piece.ResetToStart();
+            board ??= FindFirstObjectByType<ChessBoardController>();
+            board?.ResetBoard();
+        }
+
+        public void Configure(ChessBoardController controller)
+        {
+            board = controller;
         }
     }
 }
