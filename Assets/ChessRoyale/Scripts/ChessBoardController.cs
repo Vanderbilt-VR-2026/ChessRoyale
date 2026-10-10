@@ -18,6 +18,7 @@ namespace ChessRoyale
         ChessMoveResolution ValidateMove(ChessPieceState piece, BoardCoordinate from, BoardCoordinate to);
         void OnMoveCommitted(ChessPieceState piece, BoardCoordinate from, BoardCoordinate to, ChessPieceState capturedPiece);
         void OnMoveDeferred(ChessPieceState piece, BoardCoordinate from, BoardCoordinate to);
+        void OnBoardReset();
     }
 
     public sealed class ChessBoardController : MonoBehaviour
@@ -167,6 +168,27 @@ namespace ChessRoyale
             return piece;
         }
 
+        public void MovePieceDirect(ChessPieceState piece, BoardCoordinate to)
+        {
+            ChessPieceInteractable interactable = pieces.FirstOrDefault(candidate => candidate.State == piece);
+            if (interactable == null || !squares.TryGetValue(to, out BoardSquare target))
+                return;
+
+            occupancy.Remove(piece.CurrentSquare);
+            piece.MoveTo(to);
+            occupancy[to] = piece;
+            interactable.SnapTo(target);
+        }
+
+        public ChessPieceState CaptureAt(BoardCoordinate coordinate)
+        {
+            if (!occupancy.TryGetValue(coordinate, out ChessPieceState piece))
+                return null;
+            occupancy.Remove(coordinate);
+            piece.SetCaptured(true);
+            return piece;
+        }
+
         public void ResetBoard()
         {
             pendingMove = null;
@@ -180,7 +202,7 @@ namespace ChessRoyale
 
             SetPieceInteraction(true);
             ClearHighlights();
-            rules?.OnSelectionEnded();
+            rules?.OnBoardReset();
         }
 
         public void ClearHighlights()

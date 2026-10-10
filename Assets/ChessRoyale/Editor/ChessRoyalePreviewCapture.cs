@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -25,9 +26,26 @@ namespace ChessRoyale.Editor
             RenderTexture target = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
             RenderTexture previousActive = RenderTexture.active;
             RenderTexture previousTarget = camera.targetTexture;
+            List<GameObject> hiddenOverlays = new();
 
             try
             {
+                // Keep the proof image readable and demonstrate the legal-move highlight state.
+                foreach (string objectName in new[] { "White Clock — North", "White Clock — South", "Black Clock — North", "Black Clock — South", "Game Status" })
+                {
+                    GameObject overlay = GameObject.Find(objectName);
+                    if (overlay != null && overlay.activeSelf)
+                    {
+                        overlay.SetActive(false);
+                        hiddenOverlays.Add(overlay);
+                    }
+                }
+                foreach (BoardSquare square in Object.FindObjectsByType<BoardSquare>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (square.Coordinate == new BoardCoordinate(4, 2) || square.Coordinate == new BoardCoordinate(4, 3))
+                        square.SetHighlight(BoardSquareHighlight.LegalMove);
+                }
+
                 camera.targetTexture = target;
                 camera.Render();
                 RenderTexture.active = target;
@@ -44,6 +62,10 @@ namespace ChessRoyale.Editor
             {
                 camera.targetTexture = previousTarget;
                 RenderTexture.active = previousActive;
+                foreach (GameObject overlay in hiddenOverlays)
+                    overlay.SetActive(true);
+                foreach (BoardSquare square in Object.FindObjectsByType<BoardSquare>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                    square.SetHighlight(BoardSquareHighlight.None);
                 target.Release();
                 Object.DestroyImmediate(target);
             }

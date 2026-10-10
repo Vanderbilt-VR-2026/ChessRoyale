@@ -16,6 +16,7 @@ namespace ChessRoyale
     {
         [SerializeField] private ChessSide side;
         [SerializeField] private ChessPieceType pieceType;
+        [SerializeField] private ChessPieceType startingPieceType;
         [SerializeField, Range(0, 7)] private int startingFile;
         [SerializeField, Range(0, 7)] private int startingRank;
 
@@ -38,6 +39,7 @@ namespace ChessRoyale
         {
             side = pieceSide;
             pieceType = type;
+            startingPieceType = type;
             startingFile = file;
             startingRank = rank;
             currentSquare = StartingSquare;
@@ -54,6 +56,20 @@ namespace ChessRoyale
         public void PromoteTo(ChessPieceType type)
         {
             pieceType = type;
+            Transform existing = transform.Find("Promotion Marker");
+            if (existing != null)
+                Destroy(existing.gameObject);
+
+            GameObject marker = new("Promotion Marker");
+            marker.transform.SetParent(transform, false);
+            marker.transform.localPosition = Vector3.up * 1.6f;
+            TextMesh label = marker.AddComponent<TextMesh>();
+            label.text = type.ToString().Substring(0, 1);
+            label.anchor = TextAnchor.MiddleCenter;
+            label.alignment = TextAlignment.Center;
+            label.fontSize = 72;
+            label.characterSize = 0.09f;
+            label.color = side == ChessSide.White ? new Color(0.3f, 0.95f, 1f) : new Color(1f, 0.25f, 0.75f);
         }
 
         public void SetCaptured(bool captured)
@@ -67,6 +83,10 @@ namespace ChessRoyale
             currentSquare = StartingSquare;
             initialized = true;
             IsCaptured = false;
+            pieceType = startingPieceType;
+            Transform marker = transform.Find("Promotion Marker");
+            if (marker != null)
+                Destroy(marker.gameObject);
             gameObject.SetActive(true);
         }
     }

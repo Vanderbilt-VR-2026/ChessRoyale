@@ -75,7 +75,10 @@ namespace ChessRoyale.Editor
             boardController = gameplayRoot.AddComponent<ChessBoardController>();
             CreateBoard();
             CreatePieces();
-            CreateChessClocks();
+            ChessClock clock = CreateChessClocks();
+            TextMesh gameStatus = CreateWorldText("Game Status", "WHITE TO MOVE", new Vector3(0f, 5.4f, 11.9f), 0.1f, 54);
+            gameStatus.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+            gameplayRoot.AddComponent<ChessGameController>().Configure(clock, gameStatus);
             CreateResetPedestal();
             CreateXRPlayer();
             CreateInstructions();
@@ -420,7 +423,7 @@ namespace ChessRoyale.Editor
             }
         }
 
-        private static void CreateChessClocks()
+        private static ChessClock CreateChessClocks()
         {
             GameObject clockObject = new GameObject("Chess Clock");
             ChessClock clock = clockObject.AddComponent<ChessClock>();
@@ -431,6 +434,7 @@ namespace ChessRoyale.Editor
             TextMesh blackSouth = CreateClockDisplay("Black Clock — South", new Vector3(-5.5f, 3.35f, -8.4f), Quaternion.identity, magentaMaterial);
 
             clock.Configure(300f, new[] { whiteNorth, whiteSouth }, new[] { blackNorth, blackSouth });
+            return clock;
         }
 
         private static TextMesh CreateClockDisplay(string name, Vector3 position, Quaternion rotation, Material backingMaterial)
