@@ -24,17 +24,11 @@ namespace ChessRoyale.Editor
         private const float BoardCenterZ = 2f;
         private const float BoardTop = 0.42f;
         private const float SquareSize = 2f;
-        private const float BoardWidth = 16f;
-
         private static readonly string ChessRoot = "Assets/Chess MEGA-pack";
-        private static readonly string SciFiRoot = "Assets/Creepy_Cat/3D Scifi Kit Starter Kit_HD";
         private static readonly string XrRigPath = "Assets/Samples/XR Interaction Toolkit/3.3.2/Starter Assets/Prefabs/XR Origin (XR Rig).prefab";
 
         private static Material whiteMaterial;
         private static Material blackMaterial;
-        private static Material cyanMaterial;
-        private static Material magentaMaterial;
-        private static Material sciFiMaterial;
         private static Material boardLightMaterial;
         private static Material boardDarkMaterial;
 
@@ -47,12 +41,9 @@ namespace ChessRoyale.Editor
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             CreateMaterials();
             CreateLighting();
-            CreateSciFiArena();
             CreateBoard();
             CreatePieces();
-            CreateResetPedestal();
             CreateXRPlayer();
-            CreateInstructions();
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
@@ -65,9 +56,7 @@ namespace ChessRoyale.Editor
         {
             string[] required =
             {
-                $"{ChessRoot}/prefabs/boards/LowPolyConcrete.prefab",
                 $"{ChessRoot}/prefabs/pieces/LowPoly1/kingLowPoly1.prefab",
-                $"{SciFiRoot}/Prefabs/Floors/Room_Floor_3x3.prefab",
                 XrRigPath,
             };
 
@@ -151,11 +140,8 @@ namespace ChessRoyale.Editor
         {
             whiteMaterial = CreateMaterial("RoyalWhite", new Color(0.78f, 0.9f, 1f), new Color(0.06f, 0.35f, 0.6f));
             blackMaterial = CreateMaterial("RoyalBlack", new Color(0.08f, 0.04f, 0.13f), new Color(0.55f, 0.04f, 0.75f));
-            cyanMaterial = CreateMaterial("NeonCyan", new Color(0.03f, 0.32f, 0.42f), new Color(0f, 1.3f, 2f));
-            magentaMaterial = CreateMaterial("NeonMagenta", new Color(0.35f, 0.02f, 0.25f), new Color(1.5f, 0f, 0.9f));
-            sciFiMaterial = CreateMaterial("SciFiGunmetal", new Color(0.055f, 0.075f, 0.11f), new Color(0.01f, 0.08f, 0.12f));
-            boardLightMaterial = CreateMaterial("BoardSilver", new Color(0.42f, 0.5f, 0.58f), new Color(0.02f, 0.08f, 0.12f));
-            boardDarkMaterial = CreateMaterial("BoardObsidian", new Color(0.025f, 0.035f, 0.06f), new Color(0.08f, 0.01f, 0.12f));
+            boardLightMaterial = CreateBoardMaterial("BoardSilver", Color.white);
+            boardDarkMaterial = CreateBoardMaterial("BoardObsidian", Color.black);
         }
 
         private static Material CreateMaterial(string name, Color baseColor, Color emission)
@@ -179,114 +165,57 @@ namespace ChessRoyale.Editor
             return material;
         }
 
+        private static Material CreateBoardMaterial(string name, Color color)
+        {
+            string path = $"Assets/ChessRoyale/Materials/{name}.mat";
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
+            if (material == null)
+            {
+                material = new Material(shader) { name = name };
+                AssetDatabase.CreateAsset(material, path);
+            }
+            else
+            {
+                material.shader = shader;
+            }
+
+            material.SetColor("_BaseColor", color);
+            material.SetColor("_Color", color);
+            material.DisableKeyword("_EMISSION");
+            EditorUtility.SetDirty(material);
+            return material;
+        }
+
         private static void CreateLighting()
         {
-            RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.12f, 0.17f, 0.26f);
-            RenderSettings.ambientEquatorColor = new Color(0.035f, 0.06f, 0.11f);
-            RenderSettings.ambientGroundColor = new Color(0.01f, 0.015f, 0.025f);
-            RenderSettings.fog = true;
-            RenderSettings.fogColor = new Color(0.015f, 0.025f, 0.055f);
-            RenderSettings.fogMode = FogMode.ExponentialSquared;
-            RenderSettings.fogDensity = 0.012f;
+            RenderSettings.ambientMode = AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.22f, 0.22f, 0.22f);
+            RenderSettings.fog = false;
 
             GameObject keyLight = new GameObject("Key Light");
             Light directional = keyLight.AddComponent<Light>();
             directional.type = LightType.Directional;
-            directional.intensity = 1.15f;
-            directional.color = new Color(0.72f, 0.84f, 1f);
+            directional.intensity = 1.25f;
+            directional.color = Color.white;
             keyLight.transform.rotation = Quaternion.Euler(45f, -30f, 0f);
-
-            CreatePointLight("Cyan Arena Light", new Vector3(-7f, 5f, 2f), new Color(0f, 0.8f, 1f));
-            CreatePointLight("Magenta Arena Light", new Vector3(7f, 5f, 2f), new Color(1f, 0.05f, 0.65f));
-        }
-
-        private static void CreatePointLight(string name, Vector3 position, Color color)
-        {
-            GameObject lightObject = new GameObject(name);
-            lightObject.transform.position = position;
-            Light light = lightObject.AddComponent<Light>();
-            light.type = LightType.Point;
-            light.range = 22f;
-            light.intensity = 850f;
-            light.color = color;
-        }
-
-        private static void CreateSciFiArena()
-        {
-            GameObject arena = new GameObject("SCI-FI ARENA — Creepy Cat Asset Pack");
-            GameObject floorPrefab = LoadPrefab($"{SciFiRoot}/Prefabs/Floors/Room_Floor_3x3.prefab");
-            GameObject wallPrefab = LoadPrefab($"{SciFiRoot}/Prefabs/Walls/Wall_Simple_01_Long.prefab");
-            GameObject columnPrefab = LoadPrefab($"{SciFiRoot}/Your_Hown_Prefabs/Simple_Column_01.prefab");
-
-            GameObject floor = InstantiatePrefab(floorPrefab, arena.transform, "SciFi Floor");
-            floor.transform.position = new Vector3(0f, 0f, BoardCenterZ);
-            FitObjectToXZ(floor, 30f, 30f);
-            ApplyMaterial(floor, sciFiMaterial);
-
-            CreateWall(wallPrefab, arena.transform, new Vector3(0f, 3f, 16f), Quaternion.identity, new Vector3(5f, 2f, 1f));
-            CreateWall(wallPrefab, arena.transform, new Vector3(-15f, 3f, 2f), Quaternion.Euler(0f, 90f, 0f), new Vector3(5f, 2f, 1f));
-            CreateWall(wallPrefab, arena.transform, new Vector3(15f, 3f, 2f), Quaternion.Euler(0f, 90f, 0f), new Vector3(5f, 2f, 1f));
-
-            foreach (Vector3 position in new[]
-                     {
-                         new Vector3(-11f, 0f, -8f), new Vector3(11f, 0f, -8f),
-                         new Vector3(-11f, 0f, 12f), new Vector3(11f, 0f, 12f),
-                     })
-            {
-                GameObject column = InstantiatePrefab(columnPrefab, arena.transform, "SciFi Column");
-                column.transform.position = position;
-                column.transform.localScale *= 1.6f;
-                ApplyMaterial(column, cyanMaterial);
-            }
-
-            GameObject groundCollider = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            groundCollider.name = "Arena Floor Collider";
-            groundCollider.transform.SetParent(arena.transform);
-            groundCollider.transform.position = new Vector3(0f, -0.12f, BoardCenterZ);
-            groundCollider.transform.localScale = new Vector3(32f, 0.2f, 32f);
-            UnityEngine.Object.DestroyImmediate(groundCollider.GetComponent<MeshRenderer>());
-        }
-
-        private static void CreateWall(GameObject prefab, Transform parent, Vector3 position, Quaternion rotation, Vector3 scale)
-        {
-            GameObject wall = InstantiatePrefab(prefab, parent, "SciFi Wall");
-            wall.transform.SetPositionAndRotation(position, rotation);
-            wall.transform.localScale = Vector3.Scale(wall.transform.localScale, scale);
-            ApplyMaterial(wall, sciFiMaterial);
         }
 
         private static void CreateBoard()
         {
-            GameObject boardPrefab = LoadPrefab($"{ChessRoot}/prefabs/boards/LowPolyConcrete.prefab");
-            GameObject board = InstantiatePrefab(boardPrefab, null, "GIANT CHESS BOARD — Chess Mega Set");
-            board.transform.position = new Vector3(0f, BoardTop, BoardCenterZ);
-            FitObjectToXZ(board, BoardWidth, BoardWidth);
-            PlaceBoundsBottomAt(board, BoardTop - 0.2f);
-            ApplyMaterial(board, sciFiMaterial);
-
-            GameObject squares = new GameObject("64 Playable Board Squares");
-            squares.transform.SetParent(board.transform.parent, true);
+            GameObject squares = new GameObject("CHESS BOARD — 64 Independent Squares");
             for (int rank = 0; rank < 8; rank++)
             {
                 for (int file = 0; file < 8; file++)
                 {
                     GameObject square = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                    square.name = $"Square {char.ConvertFromUtf32('A' + file)}{rank + 1}";
                     square.transform.SetParent(squares.transform, true);
-                    square.transform.position = new Vector3(-7f + file * SquareSize, BoardTop - 0.06f, -5f + rank * SquareSize);
-                    square.transform.localScale = new Vector3(1.94f, 0.12f, 1.94f);
+                    square.transform.position = new Vector3(-7f + file * SquareSize, BoardTop + 0.025f, -5f + rank * SquareSize);
+                    square.transform.localScale = new Vector3(1.98f, 0.05f, 1.98f);
                     square.GetComponent<Renderer>().sharedMaterial = (file + rank) % 2 == 0 ? boardLightMaterial : boardDarkMaterial;
+                    square.AddComponent<ChessBoardSquare>().Initialize(file, rank);
                 }
             }
-
-            Bounds bounds = CalculateBounds(board);
-            BoxCollider collider = board.GetComponent<BoxCollider>();
-            if (collider == null)
-                collider = board.AddComponent<BoxCollider>();
-            float scale = Mathf.Max(0.0001f, board.transform.lossyScale.x);
-            collider.center = board.transform.InverseTransformPoint(bounds.center);
-            collider.size = new Vector3(bounds.size.x / scale, Mathf.Max(bounds.size.y / scale, 0.08f), bounds.size.z / scale);
         }
 
         private static void CreatePieces()
@@ -367,29 +296,6 @@ namespace ChessRoyale.Editor
             }
         }
 
-        private static void CreateResetPedestal()
-        {
-            GameObject pedestal = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            pedestal.name = "RESET BOARD — Grab or Ray Select";
-            pedestal.transform.position = new Vector3(-10.5f, 0.65f, -7.5f);
-            pedestal.transform.localScale = new Vector3(1.2f, 0.65f, 1.2f);
-            pedestal.GetComponent<Renderer>().sharedMaterial = magentaMaterial;
-            pedestal.AddComponent<XRSimpleInteractable>();
-            pedestal.AddComponent<ChessBoardReset>();
-
-            GameObject label = new GameObject("Reset Label");
-            label.transform.SetParent(pedestal.transform, false);
-            label.transform.localPosition = new Vector3(0f, 1.2f, 0f);
-            label.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            TextMesh text = label.AddComponent<TextMesh>();
-            text.text = "RESET";
-            text.alignment = TextAlignment.Center;
-            text.anchor = TextAnchor.MiddleCenter;
-            text.characterSize = 0.24f;
-            text.fontSize = 48;
-            text.color = Color.white;
-        }
-
         private static void CreateXRPlayer()
         {
             GameObject interactionManager = new GameObject("XR Interaction Manager");
@@ -410,20 +316,6 @@ namespace ChessRoyale.Editor
                 camera.nearClipPlane = 0.05f;
                 camera.farClipPlane = 150f;
             }
-        }
-
-        private static void CreateInstructions()
-        {
-            GameObject sign = new GameObject("VR Instructions");
-            sign.transform.position = new Vector3(0f, 5.25f, 14.8f);
-            sign.transform.rotation = Quaternion.identity;
-            TextMesh text = sign.AddComponent<TextMesh>();
-            text.text = "CHESS ROYALE\nGRIP: NEAR GRAB   •   TRIGGER: RAY DRAG\nSELECT RESET PEDESTAL TO RESTART";
-            text.alignment = TextAlignment.Center;
-            text.anchor = TextAnchor.MiddleCenter;
-            text.characterSize = 0.11f;
-            text.fontSize = 64;
-            text.color = new Color(0.55f, 0.92f, 1f);
         }
 
         private static GameObject LoadPrefab(string path)
@@ -459,13 +351,6 @@ namespace ChessRoyale.Editor
                     materials[i] = material;
                 renderer.sharedMaterials = materials;
             }
-        }
-
-        private static void FitObjectToXZ(GameObject target, float width, float depth)
-        {
-            Bounds bounds = CalculateBounds(target);
-            float scale = Mathf.Min(width / Mathf.Max(0.001f, bounds.size.x), depth / Mathf.Max(0.001f, bounds.size.z));
-            target.transform.localScale *= scale;
         }
 
         private static void PlaceBoundsBottomAt(GameObject target, float y)
