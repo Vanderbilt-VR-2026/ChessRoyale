@@ -12,9 +12,13 @@ namespace ChessRoyale
         [SerializeField] private string coordinate;
         [SerializeField] private int fileIndex;
         [SerializeField] private int rankIndex;
+        [SerializeField] private GameObject hintBoundary;
 
-        private Renderer squareRenderer;
+        private Renderer[] hintRenderers;
         private MaterialPropertyBlock materialProperties;
+        private bool moveHintActive;
+        private bool captureHintActive;
+        private bool checkHintActive;
 
         public string Coordinate => coordinate;
         public int FileIndex => fileIndex;
@@ -23,8 +27,7 @@ namespace ChessRoyale
 
         private void Awake()
         {
-            squareRenderer = GetComponent<Renderer>();
-            materialProperties = new MaterialPropertyBlock();
+            CacheHintRenderers();
         }
 
         private void OnEnable()
@@ -37,12 +40,25 @@ namespace ChessRoyale
             ActiveSquares.Remove(this);
         }
 
-        public void Initialize(int file, int rank)
+        private void Update()
+        {
+            if (!checkHintActive)
+                return;
+
+            float pulse = 1.5f + Mathf.Sin(Time.unscaledTime * 5f) * 0.5f;
+            ApplyHintColor(new Color(1f, 0.05f, 0.03f, 1f), pulse);
+        }
+
+        public void Initialize(int file, int rank, GameObject boundary = null)
         {
             fileIndex = file;
             rankIndex = rank;
             coordinate = $"{(char)('A' + file)}{rank + 1}";
             name = $"Square {coordinate}";
+            hintBoundary = boundary;
+            CacheHintRenderers();
+            if (hintBoundary != null)
+                hintBoundary.SetActive(false);
         }
 
         public static ChessBoardSquare FindClosest(Vector3 worldPosition, float maxHorizontalDistance)
@@ -68,22 +84,62 @@ namespace ChessRoyale
 
         public void SetMoveHint(bool isCapture)
         {
-            if (squareRenderer == null)
-                return;
-
-            Color hintColor = isCapture
-                ? new Color(1f, 0.22f, 0.12f, 1f)
-                : new Color(0.1f, 0.55f, 1f, 1f);
-            materialProperties.Clear();
-            materialProperties.SetColor("_BaseColor", hintColor);
-            materialProperties.SetColor("_Color", hintColor);
-            squareRenderer.SetPropertyBlock(materialProperties);
+            moveHintActive = true;
+            captureHintActive = isCapture;
+            RefreshHintVisual();
         }
 
         public void ClearMoveHint()
         {
-            if (squareRenderer != null)
-                squareRenderer.SetPropertyBlock(null);
+            moveHintActive = false;
+            captureHintActive = false;
+            RefreshHintVisual();
+        }
+
+        public void SetCheckHint(bool enabled)
+        {
+            checkHintActive = enabled;
+            RefreshHintVisual();
+        }
+
+        private void CacheHintRenderers()
+        {
+            if (materialProperties == null)
+                materialProperties = new MaterialPropertyBlock();
+            hintRenderers = hintBoundary != null
+                ? hintBoundary.GetComponentsInChildren<Renderer>(true)
+                : System.Array.Empty<Renderer>();
+        }
+
+        private void RefreshHintVisual()
+        {
+            if (hintBoundary == null)
+                return;
+
+            bool visible = checkHintActive || moveHintActive;
+            hintBoundary.SetActive(visible);
+            if (!visible)
+                return;
+
+            if (checkHintActive)
+                ApplyHintColor(new Color(1f, 0.05f, 0.03f, 1f), 1.5f);
+            else if (captureHintActive)
+                ApplyHintColor(new Color(1f, 0.2f, 0.05f, 1f), 1.25f);
+            else
+                ApplyHintColor(new Color(0.05f, 0.55f, 1f, 1f), 1.1f);
+        }
+
+        private void ApplyHintColor(Color color, float emissionStrength)
+        {
+            if (hintRenderers == null || hintRenderers.Length == 0)
+                CacheHintRenderers();
+
+            materialProperties.Clear();
+            materialProperties.SetColor("_BaseColor", color);
+            materialProperties.SetColor("_Color", color);
+            materialProperties.SetColor("_EmissionColor", color * emissionStrength);
+            foreach (Renderer hintRenderer in hintRenderers)
+                hintRenderer.SetPropertyBlock(materialProperties);
         }
     }
 }
