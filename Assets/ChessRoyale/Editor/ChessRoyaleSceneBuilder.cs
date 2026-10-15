@@ -42,6 +42,7 @@ namespace ChessRoyale.Editor
             CreateMaterials();
             CreateLighting();
             CreateBoard();
+            CreateGameController();
             CreatePieces();
             CreateXRPlayer();
 
@@ -231,6 +232,12 @@ namespace ChessRoyale.Editor
                 CreatePiece("pawn", true, new Vector3(x, BoardTop, 7f), piecesRoot.transform, file);
                 CreatePiece(order[file], true, new Vector3(x, BoardTop, 9f), piecesRoot.transform, file);
             }
+        }
+
+        private static void CreateGameController()
+        {
+            GameObject controller = new GameObject("Chess Game Controller — Legal Moves + Turns");
+            controller.AddComponent<ChessGameController>();
         }
 
         private static void CreatePiece(string type, bool black, Vector3 boardPosition, Transform parent, int file)

@@ -39,11 +39,14 @@ namespace ChessRoyale
         private ChessBoardSquare startingSquare;
         private ChessBoardSquare grabOriginSquare;
         private float baseOffset;
+        private bool moveAllowed;
+        private bool captured;
 
         public ChessPieceColor PieceColor => pieceColor;
         public ChessPieceType PieceType => pieceType;
         public ChessBoardSquare CurrentSquare => currentSquare;
         public bool HasMoved => hasMoved;
+        public bool IsCaptured => captured;
 
         public void Initialize(ChessPieceColor color, ChessPieceType type)
         {
@@ -71,6 +74,7 @@ namespace ChessRoyale
         {
             startingSquare = ChessBoardSquare.FindClosest(startingPosition, MaximumSquareDropDistance);
             currentSquare = startingSquare;
+            ChessGameController.Instance?.RegisterPiece(this, startingSquare);
         }
 
         private void OnEnable()
@@ -96,6 +100,7 @@ namespace ChessRoyale
         private void OnGrabbed(SelectEnterEventArgs _)
         {
             grabOriginSquare = currentSquare;
+            moveAllowed = ChessGameController.Instance == null || ChessGameController.Instance.BeginMove(this);
             body.linearVelocity = Vector3.zero;
             body.angularVelocity = Vector3.zero;
             body.rotation = startingRotation;
@@ -104,22 +109,42 @@ namespace ChessRoyale
         private void OnReleased(SelectExitEventArgs _)
         {
             ChessBoardSquare destination = ChessBoardSquare.FindClosest(transform.position, MaximumSquareDropDistance);
-            if (destination == null || IsOccupiedByAnotherPiece(destination))
+            ChessGameController game = ChessGameController.Instance;
+            if (!moveAllowed || destination == null)
+            {
+                game?.CancelMove();
+                SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
+                return;
+            }
+
+            if (game != null)
+            {
+                if (!game.TryMove(this, destination))
+                {
+                    SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
+                    return;
+                }
+            }
+            else if (IsOccupiedByAnotherPiece(destination))
             {
                 SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
                 return;
             }
 
-            if (destination != currentSquare)
-                hasMoved = true;
+            hasMoved |= destination != currentSquare;
             SnapToSquare(destination);
+            game?.FinishMovePresentation();
         }
 
         public void ResetToStart()
         {
+            if (!gameObject.activeSelf)
+                gameObject.SetActive(true);
+
             body.linearVelocity = Vector3.zero;
             body.angularVelocity = Vector3.zero;
             hasMoved = false;
+            captured = false;
             if (startingSquare != null)
                 SnapToSquare(startingSquare);
             else
@@ -127,6 +152,21 @@ namespace ChessRoyale
                 body.position = startingPosition;
                 body.rotation = startingRotation;
             }
+        }
+
+        public void SetTurnEnabled(bool enabled)
+        {
+            if (grabInteractable != null && !captured)
+                grabInteractable.enabled = enabled;
+        }
+
+        public void Capture()
+        {
+            captured = true;
+            currentSquare = null;
+            body.linearVelocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
+            gameObject.SetActive(false);
         }
 
         private bool IsOccupiedByAnotherPiece(ChessBoardSquare square)
