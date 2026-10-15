@@ -2,6 +2,8 @@
 
 Chess Royale is a Meta Quest VR chess prototype built with Unity and OpenXR. The current scene places the player in the middle of a large black-and-white board with human-sized chess pieces that can be grabbed nearby or dragged from a distance.
 
+Project history: [Sprint 1 summary and VR demo](SPRINT1.md).
+
 ## Current state
 
 The current Sprint 2 stack includes:
