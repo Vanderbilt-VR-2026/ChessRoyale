@@ -25,6 +25,7 @@ namespace ChessRoyale
     public sealed class ChessPieceInteractable : MonoBehaviour
     {
         private const float MaximumSquareDropDistance = 1.45f;
+        private const float BoardElevationTolerance = 0.01f;
         private static readonly HashSet<ChessPieceInteractable> ActivePieces = new HashSet<ChessPieceInteractable>();
 
         [SerializeField] private ChessPieceColor pieceColor;
@@ -41,6 +42,7 @@ namespace ChessRoyale
         private float baseOffset;
         private bool moveAllowed;
         private bool captured;
+        private bool boardSettlementPending;
 
         public ChessPieceColor PieceColor => pieceColor;
         public ChessPieceType PieceType => pieceType;
@@ -97,12 +99,27 @@ namespace ChessRoyale
                 ResetToStart();
         }
 
+        private void LateUpdate()
+        {
+            if (captured || currentSquare == null || grabInteractable == null || grabInteractable.isSelected)
+                return;
+
+            Vector3 restingPosition = GetRestingPosition(currentSquare);
+            if (!boardSettlementPending && Mathf.Abs(body.position.y - restingPosition.y) <= BoardElevationTolerance)
+                return;
+
+            // XR finishes detach processing late in the frame. Re-applying the board pose here
+            // prevents its final hand pose from leaving a released piece above or below the board.
+            SnapToSquare(currentSquare);
+            boardSettlementPending = false;
+        }
+
         private void OnGrabbed(SelectEnterEventArgs _)
         {
             grabOriginSquare = currentSquare;
             moveAllowed = ChessGameController.Instance == null || ChessGameController.Instance.BeginMove(this);
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
+            boardSettlementPending = true;
+            StopMotion();
             body.rotation = startingRotation;
         }
 
@@ -141,10 +158,10 @@ namespace ChessRoyale
             if (!gameObject.activeSelf)
                 gameObject.SetActive(true);
 
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
+            StopMotion();
             hasMoved = false;
             captured = false;
+            boardSettlementPending = false;
             if (startingSquare != null)
                 SnapToSquare(startingSquare);
             else
@@ -164,8 +181,8 @@ namespace ChessRoyale
         {
             captured = true;
             currentSquare = null;
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
+            boardSettlementPending = false;
+            StopMotion();
             gameObject.SetActive(false);
         }
 
@@ -185,16 +202,30 @@ namespace ChessRoyale
             if (square == null)
                 return;
 
+            Vector3 restingPosition = GetRestingPosition(square);
+            StopMotion();
+            body.position = restingPosition;
+            body.rotation = startingRotation;
+            currentSquare = square;
+        }
+
+        private void StopMotion()
+        {
+            if (body.isKinematic)
+                return;
+
+            body.linearVelocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
+        }
+
+        private Vector3 GetRestingPosition(ChessBoardSquare square)
+        {
             Collider squareCollider = square.GetComponent<Collider>();
             float squareTop = squareCollider != null
                 ? squareCollider.bounds.max.y
                 : square.Center.y;
 
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
-            body.position = new Vector3(square.Center.x, squareTop + baseOffset, square.Center.z);
-            body.rotation = startingRotation;
-            currentSquare = square;
+            return new Vector3(square.Center.x, squareTop + baseOffset, square.Center.z);
         }
 
         private float CalculateBaseOffset()
