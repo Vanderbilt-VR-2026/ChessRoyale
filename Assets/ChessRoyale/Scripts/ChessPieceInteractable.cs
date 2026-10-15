@@ -25,6 +25,7 @@ namespace ChessRoyale
     public sealed class ChessPieceInteractable : MonoBehaviour
     {
         private const float MaximumSquareDropDistance = 1.45f;
+        private const float BoardElevationTolerance = 0.01f;
         private static readonly HashSet<ChessPieceInteractable> ActivePieces = new HashSet<ChessPieceInteractable>();
 
         [SerializeField] private ChessPieceColor pieceColor;
@@ -39,11 +40,15 @@ namespace ChessRoyale
         private ChessBoardSquare startingSquare;
         private ChessBoardSquare grabOriginSquare;
         private float baseOffset;
+        private bool moveAllowed;
+        private bool captured;
+        private bool boardSettlementPending;
 
         public ChessPieceColor PieceColor => pieceColor;
         public ChessPieceType PieceType => pieceType;
         public ChessBoardSquare CurrentSquare => currentSquare;
         public bool HasMoved => hasMoved;
+        public bool IsCaptured => captured;
 
         public void Initialize(ChessPieceColor color, ChessPieceType type)
         {
@@ -71,6 +76,7 @@ namespace ChessRoyale
         {
             startingSquare = ChessBoardSquare.FindClosest(startingPosition, MaximumSquareDropDistance);
             currentSquare = startingSquare;
+            ChessGameController.Instance?.RegisterPiece(this, startingSquare);
         }
 
         private void OnEnable()
@@ -93,33 +99,69 @@ namespace ChessRoyale
                 ResetToStart();
         }
 
+        private void LateUpdate()
+        {
+            if (captured || currentSquare == null || grabInteractable == null || grabInteractable.isSelected)
+                return;
+
+            Vector3 restingPosition = GetRestingPosition(currentSquare);
+            if (!boardSettlementPending && Mathf.Abs(body.position.y - restingPosition.y) <= BoardElevationTolerance)
+                return;
+
+            // XR finishes detach processing late in the frame. Re-applying the board pose here
+            // prevents its final hand pose from leaving a released piece above or below the board.
+            SnapToSquare(currentSquare);
+            boardSettlementPending = false;
+        }
+
         private void OnGrabbed(SelectEnterEventArgs _)
         {
             grabOriginSquare = currentSquare;
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
+            moveAllowed = ChessGameController.Instance == null || ChessGameController.Instance.BeginMove(this);
+            boardSettlementPending = true;
+            StopMotion();
             body.rotation = startingRotation;
         }
 
         private void OnReleased(SelectExitEventArgs _)
         {
             ChessBoardSquare destination = ChessBoardSquare.FindClosest(transform.position, MaximumSquareDropDistance);
-            if (destination == null || IsOccupiedByAnotherPiece(destination))
+            ChessGameController game = ChessGameController.Instance;
+            if (!moveAllowed || destination == null)
+            {
+                game?.CancelMove();
+                SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
+                return;
+            }
+
+            if (game != null)
+            {
+                if (!game.TryMove(this, destination))
+                {
+                    SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
+                    return;
+                }
+            }
+            else if (IsOccupiedByAnotherPiece(destination))
             {
                 SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
                 return;
             }
 
-            if (destination != currentSquare)
-                hasMoved = true;
+            hasMoved |= destination != currentSquare;
             SnapToSquare(destination);
+            game?.FinishMovePresentation();
         }
 
         public void ResetToStart()
         {
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
+            if (!gameObject.activeSelf)
+                gameObject.SetActive(true);
+
+            StopMotion();
             hasMoved = false;
+            captured = false;
+            boardSettlementPending = false;
             if (startingSquare != null)
                 SnapToSquare(startingSquare);
             else
@@ -127,6 +169,21 @@ namespace ChessRoyale
                 body.position = startingPosition;
                 body.rotation = startingRotation;
             }
+        }
+
+        public void SetTurnEnabled(bool enabled)
+        {
+            if (grabInteractable != null && !captured)
+                grabInteractable.enabled = enabled;
+        }
+
+        public void Capture()
+        {
+            captured = true;
+            currentSquare = null;
+            boardSettlementPending = false;
+            StopMotion();
+            gameObject.SetActive(false);
         }
 
         private bool IsOccupiedByAnotherPiece(ChessBoardSquare square)
@@ -145,16 +202,30 @@ namespace ChessRoyale
             if (square == null)
                 return;
 
+            Vector3 restingPosition = GetRestingPosition(square);
+            StopMotion();
+            body.position = restingPosition;
+            body.rotation = startingRotation;
+            currentSquare = square;
+        }
+
+        private void StopMotion()
+        {
+            if (body.isKinematic)
+                return;
+
+            body.linearVelocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
+        }
+
+        private Vector3 GetRestingPosition(ChessBoardSquare square)
+        {
             Collider squareCollider = square.GetComponent<Collider>();
             float squareTop = squareCollider != null
                 ? squareCollider.bounds.max.y
                 : square.Center.y;
 
-            body.linearVelocity = Vector3.zero;
-            body.angularVelocity = Vector3.zero;
-            body.position = new Vector3(square.Center.x, squareTop + baseOffset, square.Center.z);
-            body.rotation = startingRotation;
-            currentSquare = square;
+            return new Vector3(square.Center.x, squareTop + baseOffset, square.Center.z);
         }
 
         private float CalculateBaseOffset()

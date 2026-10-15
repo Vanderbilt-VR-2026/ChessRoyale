@@ -13,10 +13,19 @@ namespace ChessRoyale
         [SerializeField] private int fileIndex;
         [SerializeField] private int rankIndex;
 
+        private Renderer squareRenderer;
+        private MaterialPropertyBlock materialProperties;
+
         public string Coordinate => coordinate;
         public int FileIndex => fileIndex;
         public int RankIndex => rankIndex;
         public Vector3 Center => transform.position;
+
+        private void Awake()
+        {
+            squareRenderer = GetComponent<Renderer>();
+            materialProperties = new MaterialPropertyBlock();
+        }
 
         private void OnEnable()
         {
@@ -55,6 +64,26 @@ namespace ChessRoyale
             }
 
             return closest;
+        }
+
+        public void SetMoveHint(bool isCapture)
+        {
+            if (squareRenderer == null)
+                return;
+
+            Color hintColor = isCapture
+                ? new Color(1f, 0.22f, 0.12f, 1f)
+                : new Color(0.1f, 0.55f, 1f, 1f);
+            materialProperties.Clear();
+            materialProperties.SetColor("_BaseColor", hintColor);
+            materialProperties.SetColor("_Color", hintColor);
+            squareRenderer.SetPropertyBlock(materialProperties);
+        }
+
+        public void ClearMoveHint()
+        {
+            if (squareRenderer != null)
+                squareRenderer.SetPropertyBlock(null);
         }
     }
 }
