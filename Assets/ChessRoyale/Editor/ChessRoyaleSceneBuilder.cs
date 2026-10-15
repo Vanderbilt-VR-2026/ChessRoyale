@@ -266,8 +266,11 @@ namespace ChessRoyale.Editor
             if (body == null)
                 body = piece.AddComponent<Rigidbody>();
             body.mass = 18f;
+            body.isKinematic = true;
+            body.useGravity = false;
+            body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
             body.interpolation = RigidbodyInterpolation.Interpolate;
-            body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
             body.linearDamping = 1.5f;
             body.angularDamping = 3f;
 
@@ -277,10 +280,13 @@ namespace ChessRoyale.Editor
             grab.movementType = XRBaseInteractable.MovementType.Kinematic;
             grab.useDynamicAttach = true;
             grab.trackPosition = true;
-            grab.trackRotation = true;
+            grab.trackRotation = false;
             grab.throwOnDetach = false;
 
-            piece.AddComponent<ChessPieceInteractable>();
+            ChessPieceInteractable interactable = piece.AddComponent<ChessPieceInteractable>();
+            interactable.Initialize(
+                black ? ChessPieceColor.Black : ChessPieceColor.White,
+                (ChessPieceType)Enum.Parse(typeof(ChessPieceType), type, true));
         }
 
         private static float TargetHeight(string type)
