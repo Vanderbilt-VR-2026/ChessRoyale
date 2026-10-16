@@ -56,13 +56,16 @@ The separately licensed Asset Store source folders and generated Unity/build dir
 | Sarina Liu | CS | Design Director |
 | Feiyuan Yang | CS | Asset Manager |
 
+# Sprint 2 Demo
+[Watch the Sprint 2 demo video](https://github.com/Vanderbilt-VR-2026/ChessRoyale/releases/tag/sprint-2-demo)
+
 ## Sprint 2 contribution log
 
 | Team member | Work completed this sprint |
 |---|---|
 | RuoHan Chen | Migrated and populated the GitHub Kanban board; authored the product design requirements; built stable VR piece placement and snapping; implemented legal moves, turns, captures, move hints, complete chess rules, special moves, promotion, and correct board orientation. |
-| Derrick Seo | |
-| Sarina Liu | |
+| Derrick Seo | Worked on the blender and soundtracks. |
+| Sarina Liu | Added Background and Timer. Adjusted the lighting. Recorded the demo. |
 | Feiyuan Yang | Added VR teleportation limited to the board so players can move around without falling off; rebuilt the VR main menu (START/QUIT) with controller-ray interaction on the new board and set it as the first build scene; merged the main menu and teleportation onto the complete-rules stack; tested teleport boundaries and the main menu on Meta Quest 3. |
 
 ## AI usage
