@@ -46,6 +46,8 @@ namespace ChessRoyale
         private bool moveAllowed;
         private bool captured;
         private bool boardSettlementPending;
+        private Bounds boardBounds;
+        private bool hasBoardBounds;
 
         public ChessPieceColor PieceColor => pieceColor;
         public ChessPieceType PieceType => pieceType;
@@ -107,6 +109,12 @@ namespace ChessRoyale
 
         private void LateUpdate()
         {
+            if (!captured && hasBoardBounds && grabInteractable != null && grabInteractable.isSelected)
+            {
+                ConfineToBoard();
+                return;
+            }
+
             if (captured || currentSquare == null || grabInteractable == null || grabInteractable.isSelected)
                 return;
 
@@ -123,6 +131,7 @@ namespace ChessRoyale
         private void OnGrabbed(SelectEnterEventArgs _)
         {
             grabOriginSquare = currentSquare;
+            hasBoardBounds = ChessBoardSquare.TryGetBoardBounds(out boardBounds);
             moveAllowed = ChessGameController.Instance == null || ChessGameController.Instance.BeginMove(this);
             boardSettlementPending = true;
             StopMotion();
@@ -160,6 +169,22 @@ namespace ChessRoyale
             hasMoved |= destination != currentSquare;
             SnapToSquare(destination);
             game?.FinishMovePresentation();
+        }
+
+        // A held piece follows the hand, but never leaves the board footprint or sinks below board level;
+        // only capture removes it.
+        private void ConfineToBoard()
+        {
+            Vector3 position = transform.position;
+            Vector3 confined = new Vector3(
+                Mathf.Clamp(position.x, boardBounds.min.x, boardBounds.max.x),
+                Mathf.Max(position.y, boardBounds.max.y + baseOffset),
+                Mathf.Clamp(position.z, boardBounds.min.z, boardBounds.max.z));
+            if (confined == position)
+                return;
+
+            transform.position = confined;
+            body.position = confined;
         }
 
         public void ResetToStart()

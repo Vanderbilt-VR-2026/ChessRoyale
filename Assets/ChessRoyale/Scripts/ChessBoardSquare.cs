@@ -61,6 +61,31 @@ namespace ChessRoyale
                 hintBoundary.SetActive(false);
         }
 
+        // Footprint of all active squares; used to keep held pieces on the board.
+        public static bool TryGetBoardBounds(out Bounds bounds)
+        {
+            bounds = default;
+            bool found = false;
+            foreach (ChessBoardSquare square in ActiveSquares)
+            {
+                Collider squareCollider = square.GetComponent<Collider>();
+                Bounds squareBounds = squareCollider != null
+                    ? squareCollider.bounds
+                    : new Bounds(square.Center, Vector3.one);
+                if (!found)
+                {
+                    bounds = squareBounds;
+                    found = true;
+                }
+                else
+                {
+                    bounds.Encapsulate(squareBounds);
+                }
+            }
+
+            return found;
+        }
+
         public static ChessBoardSquare FindClosest(Vector3 worldPosition, float maxHorizontalDistance)
         {
             ChessBoardSquare closest = null;
