@@ -13,6 +13,8 @@ namespace ChessRoyale
         DrawInsufficientMaterial,
         DrawThreefoldRepetition,
         DrawFiftyMoveRule,
+        WhiteWinsOnTime,
+        BlackWinsOnTime,
     }
 
     [DisallowMultipleComponent]
@@ -55,6 +57,8 @@ namespace ChessRoyale
         private ChessBoardSquare checkedKingSquare;
         private bool pendingMoveWasCapture;
         private int halfmoveClock;
+
+        public event System.Action GameReset;
 
         public static ChessGameController Instance { get; private set; }
         public ChessPieceColor ActiveColor => activeColor;
@@ -200,6 +204,25 @@ namespace ChessRoyale
             }
 
             RecordCurrentPosition();
+            RefreshTurnInteraction();
+            GameReset?.Invoke();
+        }
+
+        // Called by the chess clock when a side runs out of time; the other side wins.
+        public void EndOnTime(ChessPieceColor flagged)
+        {
+            if (outcome != ChessGameOutcome.InProgress)
+                return;
+
+            ClearMoveHints();
+            ClearCheckSignal();
+            pendingPromotionPiece = null;
+            if (promotionPanel != null)
+                promotionPanel.SetActive(false);
+
+            outcome = flagged == ChessPieceColor.White ? ChessGameOutcome.BlackWinsOnTime : ChessGameOutcome.WhiteWinsOnTime;
+            statusMessage = flagged == ChessPieceColor.White ? "Black wins on time" : "White wins on time";
+            Debug.Log($"Chess Royale result: {statusMessage}");
             RefreshTurnInteraction();
         }
 
