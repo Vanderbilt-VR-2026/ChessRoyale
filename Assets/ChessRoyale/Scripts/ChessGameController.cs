@@ -57,6 +57,7 @@ namespace ChessRoyale
         private ChessBoardSquare checkedKingSquare;
         private bool pendingMoveWasCapture;
         private int halfmoveClock;
+        private bool networkRoomOpen;
 
         public event System.Action GameReset;
 
@@ -107,10 +108,21 @@ namespace ChessRoyale
                 RecordCurrentPosition();
         }
 
+        public void SetNetworkRoomOpen(bool open)
+        {
+            if (networkRoomOpen == open)
+                return;
+
+            networkRoomOpen = open;
+            if (open)
+                ClearMoveHints();
+            RefreshTurnInteraction();
+        }
+
         public bool BeginMove(ChessPieceInteractable piece)
         {
             ClearMoveHints();
-            if (outcome != ChessGameOutcome.InProgress || pendingPromotionPiece != null ||
+            if (networkRoomOpen || outcome != ChessGameOutcome.InProgress || pendingPromotionPiece != null ||
                 piece == null || piece.IsCaptured || piece.PieceColor != activeColor || piece.CurrentSquare == null)
                 return false;
 
@@ -670,7 +682,7 @@ namespace ChessRoyale
 
         private void RefreshTurnInteraction()
         {
-            bool gameAcceptsMoves = outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null;
+            bool gameAcceptsMoves = !networkRoomOpen && outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null;
             foreach (ChessPieceInteractable piece in pieces)
                 piece.SetTurnEnabled(gameAcceptsMoves && !piece.IsCaptured && piece.PieceColor == activeColor);
         }

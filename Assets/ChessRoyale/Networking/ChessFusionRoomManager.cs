@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Fusion;
 using Fusion.Sockets;
+using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -15,9 +16,15 @@ namespace ChessRoyale.Networking
         public const string TestRoomCode = "TEST";
 
         [SerializeField] private NetworkObject playerPrefab;
+        [SerializeField] private NetworkObject gameStatePrefab;
+        [SerializeField] private Transform whiteSpawn;
+        [SerializeField] private Transform blackSpawn;
 
+        private readonly System.Collections.Generic.List<GameObject> hiddenRigs = new System.Collections.Generic.List<GameObject>();
         private NetworkRunner runner;
+        private NetworkObject localPlayer;
         private bool isStarting;
+        private bool leavingIntentionally;
 
         public static ChessFusionRoomManager Instance { get; private set; }
 
@@ -25,6 +32,7 @@ namespace ChessRoyale.Networking
         public NetworkObject PlayerPrefab => playerPrefab;
         public string CurrentRoomCode { get; private set; }
         public string LastError { get; private set; }
+        public string DisconnectNotice { get; private set; }
         public bool IsConnected => runner != null && runner.IsRunning;
         public bool IsSharedModeMasterClient => IsConnected && runner.IsSharedModeMasterClient;
         public int PlayerCount => IsConnected ? runner.ActivePlayers.Count() : 0;
@@ -55,6 +63,12 @@ namespace ChessRoyale.Networking
             Instance = this;
         }
 
+        private void LateUpdate()
+        {
+            if (IsConnected)
+                ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(true);
+        }
+
         public Task<bool> CreateRoom(string roomCode)
         {
             return StartRoom(roomCode, createRoom: true);
@@ -68,11 +82,19 @@ namespace ChessRoyale.Networking
         public async Task LeaveRoom()
         {
             NetworkRunner runnerToShutdown = runner;
+            leavingIntentionally = true;
             runner = null;
+            localPlayer = null;
             CurrentRoomCode = null;
+            DisconnectNotice = null;
 
             if (runnerToShutdown == null)
+            {
+                leavingIntentionally = false;
+                RestoreSceneRigs();
+                ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(false);
                 return;
+            }
 
             try
             {
@@ -88,6 +110,9 @@ namespace ChessRoyale.Networking
             {
                 if (runnerToShutdown != null)
                     Destroy(runnerToShutdown.gameObject);
+                leavingIntentionally = false;
+                RestoreSceneRigs();
+                ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(false);
             }
 
             Debug.Log("Left Chess Royale Fusion session.", this);
@@ -115,16 +140,16 @@ namespace ChessRoyale.Networking
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(roomCode))
+            if (!ChessNetworkTypes.TryNormalizeRoomCode(roomCode, out roomCode, out string codeError))
             {
-                LastError = "Fusion room code cannot be empty.";
+                LastError = codeError;
                 Debug.LogError(LastError, this);
                 return false;
             }
 
-            roomCode = roomCode.Trim().ToUpperInvariant();
             isStarting = true;
             LastError = null;
+            DisconnectNotice = null;
 
             GameObject runnerObject = new GameObject("Chess Royale NetworkRunner");
             try
@@ -179,6 +204,9 @@ namespace ChessRoyale.Networking
                 }
 
                 CurrentRoomCode = roomCode;
+                ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(true);
+                SpawnLobbyState();
+                SpawnLocalPlayer();
                 Debug.Log(
                     $"Connected to Chess Royale Fusion Shared Mode room '{roomCode}' as " +
                     $"{(IsSharedModeMasterClient ? "master client" : "client")} " +
@@ -267,7 +295,13 @@ namespace ChessRoyale.Networking
                 LastError = $"Room '{CurrentRoomCode}' already has {MaximumPlayers} players.";
                 Debug.LogError(LastError, this);
                 _ = LeaveRoom();
+                return;
             }
+
+            if (callbackRunner.IsSharedModeMasterClient)
+                ChessFusionLobbyState.Instance?.RefreshAssignments();
+            if (player == callbackRunner.LocalPlayer)
+                SpawnLocalPlayer();
         }
 
         public void OnPlayerLeft(NetworkRunner callbackRunner, PlayerRef player)
@@ -276,6 +310,10 @@ namespace ChessRoyale.Networking
                 return;
 
             Debug.Log($"Fusion player {player} left room '{CurrentRoomCode}' ({PlayerCount}/{MaximumPlayers}).", this);
+            if (player != callbackRunner.LocalPlayer)
+                DisconnectNotice = "The other player disconnected.";
+            if (callbackRunner.IsSharedModeMasterClient)
+                ChessFusionLobbyState.Instance?.RefreshAssignments();
         }
 
         public void OnShutdown(NetworkRunner callbackRunner, ShutdownReason shutdownReason)
@@ -284,10 +322,14 @@ namespace ChessRoyale.Networking
                 return;
 
             runner = null;
+            localPlayer = null;
             string roomCode = CurrentRoomCode;
             CurrentRoomCode = null;
-            if (shutdownReason != ShutdownReason.Ok)
+            RestoreSceneRigs();
+            ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(false);
+            if (!leavingIntentionally && shutdownReason != ShutdownReason.Ok)
             {
+                DisconnectNotice = "The room closed because the other player disconnected.";
                 LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
                 Debug.LogWarning(LastError, this);
             }
@@ -303,11 +345,85 @@ namespace ChessRoyale.Networking
         public void OnReliableDataReceived(NetworkRunner callbackRunner, PlayerRef player, ReliableKey key, ReadOnlySpan<byte> data) { }
         public void OnReliableDataProgress(NetworkRunner callbackRunner, PlayerRef player, ReliableKey key, float progress) { }
         public void OnSceneLoadStart(NetworkRunner callbackRunner) { }
-        public void OnSceneLoadDone(NetworkRunner callbackRunner) { }
+        public void OnSceneLoadDone(NetworkRunner callbackRunner)
+        {
+            if (callbackRunner != runner || !IsConnected)
+                return;
+
+            ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(true);
+            SpawnLobbyState();
+            SpawnLocalPlayer();
+        }
         public void OnObjectExitAOI(NetworkRunner callbackRunner, NetworkObject obj, PlayerRef player) { }
         public void OnObjectEnterAOI(NetworkRunner callbackRunner, NetworkObject obj, PlayerRef player) { }
         public void OnInput(NetworkRunner callbackRunner, NetworkInput input) { }
         public void OnInputMissing(NetworkRunner callbackRunner, PlayerRef player, NetworkInput input) { }
+
+        private void SpawnLobbyState()
+        {
+            if (runner == null || !runner.IsRunning || !runner.IsSharedModeMasterClient || gameStatePrefab == null)
+                return;
+
+            if (ChessFusionLobbyState.Instance == null)
+                runner.Spawn(gameStatePrefab);
+
+            ChessFusionLobbyState.Instance?.RefreshAssignments();
+        }
+
+        private void SpawnLocalPlayer()
+        {
+            if (runner == null || !runner.IsRunning || playerPrefab == null)
+                return;
+            if (localPlayer != null && localPlayer.IsValid)
+                return;
+
+            HideSceneRigs();
+            bool white = runner.IsSharedModeMasterClient;
+            GetSpawnPose(white, out Vector3 position, out Quaternion rotation);
+            localPlayer = runner.Spawn(playerPrefab, position, rotation, runner.LocalPlayer);
+            if (localPlayer == null)
+            {
+                Debug.LogError("Fusion did not spawn the Chess Royale player prefab. Run Tools/Chess Royale/Configure Photon Fusion.", this);
+            }
+        }
+
+        private void GetSpawnPose(bool white, out Vector3 position, out Quaternion rotation)
+        {
+            Transform spawn = white ? whiteSpawn : blackSpawn;
+            if (spawn != null)
+            {
+                position = spawn.position;
+                rotation = spawn.rotation;
+                return;
+            }
+
+            position = white ? new Vector3(0f, 0.42f, -8f) : new Vector3(0f, 0.42f, 12f);
+            rotation = white ? Quaternion.identity : Quaternion.Euler(0f, 180f, 0f);
+        }
+
+        private void HideSceneRigs()
+        {
+            XROrigin[] origins = FindObjectsByType<XROrigin>(FindObjectsSortMode.None);
+            foreach (XROrigin origin in origins)
+            {
+                if (origin.GetComponent<ChessFusionPlayer>() != null)
+                    continue;
+
+                hiddenRigs.Add(origin.gameObject);
+                origin.gameObject.SetActive(false);
+            }
+        }
+
+        private void RestoreSceneRigs()
+        {
+            foreach (GameObject rig in hiddenRigs)
+            {
+                if (rig != null)
+                    rig.SetActive(true);
+            }
+
+            hiddenRigs.Clear();
+        }
 
         [ContextMenu("Fusion/Create Test Room")]
         private void CreateTestRoom()

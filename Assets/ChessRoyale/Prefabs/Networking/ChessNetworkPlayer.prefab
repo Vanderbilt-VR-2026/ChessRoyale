@@ -186,6 +186,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ChessRoyale.Networking.ChessFusionPlayer
   xrOrigin: {fileID: 2783109197227400798}
   xrCamera: {fileID: 5888811774620870933}
+  head: {fileID: 721450653517893369}
+  leftHand: {fileID: 1382595333814450194}
+  rightHand: {fileID: 2764201806861563551}
 --- !u!1 &1277685851182561981
 GameObject:
   m_ObjectHideFlags: 0
