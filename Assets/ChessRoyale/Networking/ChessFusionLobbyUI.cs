@@ -27,7 +27,6 @@ namespace ChessRoyale.Networking
         private Text rematchStatusText;
         private ChessSeat resultSeat = ChessSeat.None;
         private InputField codeInput;
-        private TouchScreenKeyboard roomKeyboard;
         private Camera followedCamera;
         private Canvas canvas;
         private GameObject chooseRoot;
@@ -77,7 +76,6 @@ namespace ChessRoyale.Networking
         {
             if (canvas != null && canvas.enabled)
                 FollowActiveCamera();
-            RefreshRoomKeyboard();
             RefreshScreen();
         }
 
@@ -275,12 +273,7 @@ namespace ChessRoyale.Networking
             joinMessage = "Type a four-letter room code.";
             screen = LobbyScreen.Join;
             if (codeInput != null)
-            {
                 codeInput.text = string.Empty;
-                codeInput.ActivateInputField();
-            }
-
-            OpenRoomKeyboard();
             ApplyScreen();
         }
 
@@ -378,32 +371,20 @@ namespace ChessRoyale.Networking
             return "\nBoth players must agree to rematch.";
         }
 
-        private void OpenRoomKeyboard()
+        private void TypeLetter(char letter)
         {
-            if (!TouchScreenKeyboard.isSupported || codeInput == null)
+            if (codeInput == null)
                 return;
 
-            roomKeyboard = TouchScreenKeyboard.Open(
-                codeInput.text,
-                TouchScreenKeyboardType.ASCIICapable,
-                false,
-                false,
-                false,
-                false,
-                "Room code",
-                ChessNetworkTypes.RoomCodeLength);
+            codeInput.text = LettersOnly(codeInput.text + letter);
         }
 
-        private void RefreshRoomKeyboard()
+        private void DeleteLetter()
         {
-            if (screen != LobbyScreen.Join || roomKeyboard == null || codeInput == null)
+            if (codeInput == null || codeInput.text.Length == 0)
                 return;
 
-            string typed = LettersOnly(roomKeyboard.text);
-            if (codeInput.text != typed)
-                codeInput.text = typed;
-            if (roomKeyboard.status != TouchScreenKeyboard.Status.Visible)
-                roomKeyboard = null;
+            codeInput.text = codeInput.text.Substring(0, codeInput.text.Length - 1);
         }
 
         private void SanitizeRoomCode(string value)
@@ -469,7 +450,7 @@ namespace ChessRoyale.Networking
             gameObject.AddComponent<TrackedDeviceGraphicRaycaster>();
 
             RectTransform rect = gameObject.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(920f, 760f);
+            rect.sizeDelta = new Vector2(920f, 1040f);
             rect.localScale = Vector3.one * 0.0014f;
 
             Image background = gameObject.AddComponent<Image>();
@@ -488,11 +469,12 @@ namespace ChessRoyale.Networking
             CreateButton(createRoot.transform, "LEAVE", new Vector2(0f, -180f), LeaveCreateToStart);
 
             joinRoot = CreatePage("Join");
-            CreateText(joinRoot.transform, "Join a room", new Vector2(0f, 200f), new Vector2(860f, 70f), 42);
-            joinStatusText = CreateText(joinRoot.transform, joinMessage, new Vector2(0f, 110f), new Vector2(860f, 100f), 26);
-            codeInput = CreateCodeInput(joinRoot.transform, new Vector2(0f, 10f));
-            CreateButton(joinRoot.transform, "JOIN", new Vector2(-160f, -140f), SubmitJoin);
-            CreateButton(joinRoot.transform, "BACK", new Vector2(160f, -140f), ShowChoose);
+            CreateText(joinRoot.transform, "Join a room", new Vector2(0f, 430f), new Vector2(860f, 70f), 42);
+            joinStatusText = CreateText(joinRoot.transform, joinMessage, new Vector2(0f, 350f), new Vector2(860f, 80f), 26);
+            codeInput = CreateCodeInput(joinRoot.transform, new Vector2(0f, 260f));
+            BuildJoinKeyboard(joinRoot.transform);
+            CreateButton(joinRoot.transform, "JOIN", new Vector2(-160f, -430f), SubmitJoin);
+            CreateButton(joinRoot.transform, "BACK", new Vector2(160f, -430f), ShowChoose);
 
             rematchRoot = CreatePage("Rematch");
             resultTitleText = CreateText(rematchRoot.transform, "YOU WIN", new Vector2(0f, 180f), new Vector2(860f, 100f), 64);
@@ -604,8 +586,24 @@ namespace ChessRoyale.Networking
             input.lineType = InputField.LineType.SingleLine;
             input.text = string.Empty;
             input.onValueChanged.AddListener(SanitizeRoomCode);
-            input.onSelect.AddListener(_ => OpenRoomKeyboard());
             return input;
+        }
+
+        private void BuildJoinKeyboard(Transform parent)
+        {
+            const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            const int columns = 7;
+            for (int index = 0; index < alphabet.Length; index++)
+            {
+                char letter = alphabet[index];
+                int column = index % columns;
+                int row = index / columns;
+                float x = (column - 3) * 118f;
+                float y = 150f - row * 84f;
+                CreateButton(parent, letter.ToString(), new Vector2(x, y), () => TypeLetter(letter), new Vector2(104f, 70f));
+            }
+
+            CreateButton(parent, "DEL", new Vector2((6 - 3) * 118f, 150f - 3 * 84f), DeleteLetter, new Vector2(104f, 70f));
         }
 
         private static void EnsureEventSystem()
