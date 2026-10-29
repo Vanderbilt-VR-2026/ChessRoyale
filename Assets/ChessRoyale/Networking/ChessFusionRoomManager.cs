@@ -25,6 +25,7 @@ namespace ChessRoyale.Networking
         private NetworkObject localPlayer;
         private bool isStarting;
         private bool leavingIntentionally;
+        private int startGeneration;
         private bool spawnWhenSeated;
 
         public static ChessFusionRoomManager Instance { get; private set; }
@@ -130,6 +131,7 @@ namespace ChessRoyale.Networking
 
         public async Task LeaveRoom()
         {
+            startGeneration++;
             NetworkRunner runnerToShutdown = runner;
             leavingIntentionally = true;
             runner = null;
@@ -198,6 +200,7 @@ namespace ChessRoyale.Networking
             }
 
             isStarting = true;
+            int generation = startGeneration;
             LastError = null;
             DisconnectNotice = null;
 
@@ -234,7 +237,7 @@ namespace ChessRoyale.Networking
                     ObjectProvider = objectProvider,
                 });
 
-                if (this == null)
+                if (this == null || generation != startGeneration)
                     return false;
 
                 if (!result.Ok)

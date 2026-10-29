@@ -35,6 +35,11 @@ namespace ChessRoyale.Networking
         private GameObject rematchRoot;
         private LobbyScreen screen = LobbyScreen.Choose;
         private LobbyScreen shownScreen = (LobbyScreen)(-1);
+        private int flowGeneration;
+
+        public bool IsWaitingForOpponent => screen == LobbyScreen.Create;
+
+        public string PendingRoomCode { get; private set; }
         private bool busy;
         private string joinMessage = "Type a four-letter room code.";
 
@@ -224,8 +229,12 @@ namespace ChessRoyale.Networking
 
         public void ShowChoose()
         {
-            if (busy)
+            ChessFusionRoomManager room = ChessFusionRoomManager.Instance;
+            if (busy || (room != null && room.IsConnected))
+            {
+                LeaveMatchToChoose();
                 return;
+            }
 
             screen = LobbyScreen.Choose;
             ApplyScreen();
@@ -241,7 +250,9 @@ namespace ChessRoyale.Networking
                 return;
 
             busy = true;
+            int generation = ++flowGeneration;
             string code = ChessNetworkTypes.CreateRoomCode();
+            PendingRoomCode = code;
             screen = LobbyScreen.Create;
             if (createCodeText != null)
                 createCodeText.text = code;
@@ -250,9 +261,10 @@ namespace ChessRoyale.Networking
             ApplyScreen();
 
             bool created = await room.CreateRoom(code);
-            busy = false;
-            if (this == null)
+            if (this == null || generation != flowGeneration)
                 return;
+
+            busy = false;
 
             if (screen == LobbyScreen.Playing || screen == LobbyScreen.Rematch)
                 return;
@@ -288,14 +300,16 @@ namespace ChessRoyale.Networking
 
             string code = codeInput != null ? codeInput.text : string.Empty;
             busy = true;
+            int generation = ++flowGeneration;
             joinMessage = "Looking for that room...";
             screen = LobbyScreen.Join;
             ApplyScreen();
 
             bool joined = await room.JoinRoom(code);
-            busy = false;
-            if (this == null)
+            if (this == null || generation != flowGeneration)
                 return;
+
+            busy = false;
 
             if (!joined)
             {
@@ -315,14 +329,14 @@ namespace ChessRoyale.Networking
             ApplyScreen();
         }
 
-        public async void LeaveCreateToStart()
+        public async void LeaveLobbyToMenu()
         {
             if (busy)
                 return;
 
             busy = true;
             ChessFusionRoomManager room = ChessFusionRoomManager.Instance;
-            if (room != null)
+            if (room != null && room.IsConnected)
                 await room.LeaveRoom();
             if (this == null)
                 return;
@@ -337,17 +351,21 @@ namespace ChessRoyale.Networking
 
         public async void LeaveMatchToChoose()
         {
-            if (busy)
-                return;
+            await ReturnToLobby();
+        }
 
+        private async System.Threading.Tasks.Task ReturnToLobby()
+        {
+            int generation = ++flowGeneration;
             busy = true;
+            PendingRoomCode = null;
             ChessFusionRoomManager room = ChessFusionRoomManager.Instance;
             if (room != null)
                 await room.LeaveRoom();
-            busy = false;
-            if (this == null)
+            if (this == null || generation != flowGeneration)
                 return;
 
+            busy = false;
             screen = LobbyScreen.Choose;
             ApplyScreen();
         }
@@ -461,12 +479,13 @@ namespace ChessRoyale.Networking
             CreateText(chooseRoot.transform, "Join a room or create one.", new Vector2(0f, 80f), new Vector2(860f, 60f), 28);
             CreateButton(chooseRoot.transform, "CREATE", new Vector2(-160f, -40f), BeginCreate);
             CreateButton(chooseRoot.transform, "JOIN", new Vector2(160f, -40f), ShowJoin);
+            CreateButton(chooseRoot.transform, "LEAVE", new Vector2(0f, -160f), LeaveLobbyToMenu);
 
             createRoot = CreatePage("Create");
             CreateText(createRoot.transform, "Your room code", new Vector2(0f, 180f), new Vector2(860f, 70f), 36);
             createCodeText = CreateText(createRoot.transform, "----", new Vector2(0f, 70f), new Vector2(860f, 90f), 64);
             createStatusText = CreateText(createRoot.transform, "Creating the room...", new Vector2(0f, -40f), new Vector2(860f, 120f), 26);
-            CreateButton(createRoot.transform, "LEAVE", new Vector2(0f, -180f), LeaveCreateToStart);
+            CreateButton(createRoot.transform, "LOBBY", new Vector2(0f, -180f), LeaveMatchToChoose);
 
             joinRoot = CreatePage("Join");
             CreateText(joinRoot.transform, "Join a room", new Vector2(0f, 430f), new Vector2(860f, 70f), 42);
@@ -474,7 +493,7 @@ namespace ChessRoyale.Networking
             codeInput = CreateCodeInput(joinRoot.transform, new Vector2(0f, 260f));
             BuildJoinKeyboard(joinRoot.transform);
             CreateButton(joinRoot.transform, "JOIN", new Vector2(-160f, -430f), SubmitJoin);
-            CreateButton(joinRoot.transform, "BACK", new Vector2(160f, -430f), ShowChoose);
+            CreateButton(joinRoot.transform, "LOBBY", new Vector2(160f, -430f), ShowChoose);
 
             rematchRoot = CreatePage("Rematch");
             resultTitleText = CreateText(rematchRoot.transform, "YOU WIN", new Vector2(0f, 180f), new Vector2(860f, 100f), 64);
