@@ -82,6 +82,20 @@ The separately licensed Asset Store source folders and generated Unity/build dir
 | Sarina Liu | CS | Design Director |
 | Feiyuan Yang | CS | Asset Manager |
 
+# Sprint 3
+
+## Design
+
+### Start Screen
+Players spawn inside a grand hall facing an empty chessboard, with a floating **"Chess Royale"** title panel above it. The panel offers a **mode choice**: **One Player** (local) or **Two Player** (online), followed by a **Time Control** option. We start inside the environment instead of a flat menu, so the first thing the user sees is the space itself. That tells them right away that this is a calm, elegant, strategic experience. After the player picks a mode and a time control, the pieces animate onto the board and the chess clock starts.
+
+### Hands / Controllers
+- Default controller models are replaced with **gloved hands** that match the royal hall setting.
+- The hands change during the experience: pointer hands with a ray in menus, gloves without a ray during the match, and the pointer ray returns on the game-over screen for **Play Again**.
+
+### Networking (Multiplayer)
+Players choose between **One Player** and **Two Player** mode on the start screen. Two Player mode is online and uses **Photon**: players join each other through a **lobby**, so two people in different places can sit across the same board in the same hall. Each player sees their opponent's moves and the shared chess clock in real time. Playing against a real person makes the match feel social and competitive, not just a solo puzzle.
+
 # Sprint 2 Demo
 [Watch the Sprint 2 demo video](https://github.com/Vanderbilt-VR-2026/ChessRoyale/releases/tag/sprint-2-demo)
 
