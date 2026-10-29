@@ -94,3 +94,7 @@ MonoBehaviour:
   _HalfmoveClock: 0
   _WhiteTimeMs: 0
   _BlackTimeMs: 0
+  _WhiteRematch:
+    RawValue: 0
+  _BlackRematch:
+    RawValue: 0

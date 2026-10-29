@@ -30,11 +30,43 @@ namespace ChessRoyale.Networking
         [Networked] public int HalfmoveClock { get; set; }
         [Networked] public int WhiteTimeMs { get; set; }
         [Networked] public int BlackTimeMs { get; set; }
+        [Networked] public NetworkBool WhiteRematch { get; set; }
+        [Networked] public NetworkBool BlackRematch { get; set; }
         [Networked, Capacity(32)]
         public NetworkArray<NetworkPieceState> Pieces => default;
 
         private int appliedSequence;
         private ChessRulesSnapshot latestSnapshot;
+        private int lastWhiteRequestId;
+        private int lastBlackRequestId;
+
+        public bool LocalPlayerAcceptedRematch
+        {
+            get
+            {
+                if (Runner == null)
+                    return false;
+                if (Runner.LocalPlayer == WhitePlayer)
+                    return WhiteRematch;
+                if (Runner.LocalPlayer == BlackPlayer)
+                    return BlackRematch;
+                return false;
+            }
+        }
+
+        public bool OtherPlayerAcceptedRematch
+        {
+            get
+            {
+                if (Runner == null)
+                    return false;
+                if (Runner.LocalPlayer == WhitePlayer)
+                    return BlackRematch;
+                if (Runner.LocalPlayer == BlackPlayer)
+                    return WhiteRematch;
+                return false;
+            }
+        }
 
         public static ChessNetworkGameState Instance { get; private set; }
 
@@ -118,6 +150,7 @@ namespace ChessRoyale.Networking
             if (lobby == null || !lobby.MatchReady || game == null || game.RegisteredPieceCount < 32)
                 return;
 
+            ClearRematchAgreement();
             ResetClockTimes();
             game.ResetGame();
             CopySeatsFromLobby();
@@ -133,6 +166,7 @@ namespace ChessRoyale.Networking
             if (game == null || game.RegisteredPieceCount < 32)
                 return;
 
+            ClearRematchAgreement();
             ResetClockTimes();
             game.ResetGame();
             CopySeatsFromLobby();
@@ -186,6 +220,9 @@ namespace ChessRoyale.Networking
                 return;
             }
 
+            if (!TryAcceptRequest(seat, requestId))
+                return;
+
             ChessPieceInteractable piece = game.FindPiece(pieceId);
             if (piece == null || piece.IsCaptured)
             {
@@ -231,6 +268,9 @@ namespace ChessRoyale.Networking
                 return;
             }
 
+            if (!TryAcceptRequest(seat, requestId))
+                return;
+
             if (!game.IsPromotionPending || game.PendingPromotionPieceId != pieceId)
             {
                 Reject(info.Source, requestId, pieceId, "No promotion is waiting for that piece.");
@@ -262,19 +302,29 @@ namespace ChessRoyale.Networking
         [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
         private void RPC_RequestReset(RpcInfo info = default)
         {
-            if (!TryValidateRematch(info.Source, out string error))
+            if (!TryValidateRematch(info.Source, out ChessPieceColor seat, out string error))
             {
                 Debug.LogWarning(error, this);
                 return;
             }
 
             ChessGameController game = ChessGameController.Instance;
-            if (game == null)
+            if (game == null || game.Outcome == ChessGameOutcome.InProgress)
+            {
+                Debug.LogWarning("Rematch is available after the game ends.", this);
+                return;
+            }
+
+            if (seat == ChessPieceColor.White)
+                WhiteRematch = true;
+            else
+                BlackRematch = true;
+
+            if (!WhiteRematch || !BlackRematch)
                 return;
 
-            ResetClockTimes();
-            game.ResetGame();
-            PublishAfterLocalRulesChange();
+            ClearRematchAgreement();
+            RestartMatch();
         }
 
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
@@ -287,13 +337,34 @@ namespace ChessRoyale.Networking
             ChessNetworkMoveCoordinator.Instance?.OnMoveRejected(requestId, pieceId);
         }
 
-        private bool TryValidateRematch(PlayerRef sender, out string error)
+        private bool TryValidateRematch(PlayerRef sender, out ChessPieceColor seat, out string error)
         {
-            if (!TryIdentifySeat(sender, out _, out error))
-                return false;
+            return TryIdentifySeat(sender, out seat, out error);
+        }
 
-            error = null;
+        private bool TryAcceptRequest(ChessPieceColor seat, byte requestId)
+        {
+            int last = seat == ChessPieceColor.White ? lastWhiteRequestId : lastBlackRequestId;
+            if (last != 0)
+            {
+                int delta = (requestId - (byte)last + 256) % 256;
+                if (delta == 0 || delta >= 128)
+                    return false;
+            }
+
+            if (seat == ChessPieceColor.White)
+                lastWhiteRequestId = requestId;
+            else
+                lastBlackRequestId = requestId;
             return true;
+        }
+
+        private void ClearRematchAgreement()
+        {
+            WhiteRematch = false;
+            BlackRematch = false;
+            lastWhiteRequestId = 0;
+            lastBlackRequestId = 0;
         }
 
         private bool TryValidateSender(PlayerRef sender, out ChessPieceColor seat, out string error)

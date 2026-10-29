@@ -25,6 +25,7 @@ namespace ChessRoyale.Networking
         private NetworkObject localPlayer;
         private bool isStarting;
         private bool leavingIntentionally;
+        private bool spawnWhenSeated;
 
         public static ChessFusionRoomManager Instance { get; private set; }
 
@@ -72,6 +73,8 @@ namespace ChessRoyale.Networking
 
         private void LateUpdate()
         {
+            if (spawnWhenSeated)
+                SpawnLocalPlayer();
             SyncNetworkPlay();
         }
 
@@ -102,6 +105,7 @@ namespace ChessRoyale.Networking
             leavingIntentionally = true;
             runner = null;
             localPlayer = null;
+            spawnWhenSeated = false;
             CurrentRoomCode = null;
             DisconnectNotice = null;
 
@@ -375,29 +379,28 @@ namespace ChessRoyale.Networking
 
             runner = null;
             localPlayer = null;
+            spawnWhenSeated = false;
             string roomCode = CurrentRoomCode;
             CurrentRoomCode = null;
             RestoreSceneRigs();
             SyncNetworkPlay();
-            if (leavingIntentionally)
-                return;
-
-            if (gameUnderway)
+            if (!leavingIntentionally && gameUnderway)
             {
                 ChessRoyale.ChessPieceColor disconnected = seat == ChessSeat.Black
                     ? ChessRoyale.ChessPieceColor.White
                     : ChessRoyale.ChessPieceColor.Black;
                 game.EndByDisconnect(disconnected);
                 DisconnectNotice = game.StatusMessage + " The room is closed.";
-                return;
             }
-
-            if (shutdownReason != ShutdownReason.Ok)
+            else if (!leavingIntentionally && shutdownReason != ShutdownReason.Ok)
             {
                 DisconnectNotice = "The room closed because the other player disconnected.";
                 LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
                 Debug.LogWarning(LastError, this);
             }
+
+            if (callbackRunner != null)
+                Destroy(callbackRunner.gameObject);
         }
 
         public void OnConnectedToServer(NetworkRunner callbackRunner) { }
@@ -440,11 +443,22 @@ namespace ChessRoyale.Networking
             if (runner == null || !runner.IsRunning || playerPrefab == null)
                 return;
             if (localPlayer != null && localPlayer.IsValid)
+            {
+                spawnWhenSeated = false;
                 return;
+            }
 
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            ChessSeat seat = lobby != null ? lobby.LocalSeat : ChessSeat.None;
+            if (seat == ChessSeat.None)
+            {
+                spawnWhenSeated = true;
+                return;
+            }
+
+            spawnWhenSeated = false;
             HideSceneRigs();
-            bool white = runner.IsSharedModeMasterClient;
-            GetSpawnPose(white, out Vector3 position, out Quaternion rotation);
+            GetSpawnPose(seat == ChessSeat.White, out Vector3 position, out Quaternion rotation);
             localPlayer = runner.Spawn(playerPrefab, position, rotation, runner.LocalPlayer);
             if (localPlayer == null)
             {

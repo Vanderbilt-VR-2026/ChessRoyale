@@ -120,7 +120,7 @@ namespace ChessRoyale.Networking
                  game.Outcome == ChessRoyale.ChessGameOutcome.BlackWinsByDisconnect);
             if (disconnectResult)
             {
-                statusText.text = $"Room {room.CurrentRoomCode}. You are {seatLabel}.\n{game.StatusMessage}";
+                statusText.text = $"Room {room.CurrentRoomCode}. You are {seatLabel}.\n{game.StatusMessage}{RematchStatus(game, lobby)}";
             }
             else if (!string.IsNullOrEmpty(room.DisconnectNotice))
             {
@@ -132,10 +132,10 @@ namespace ChessRoyale.Networking
             }
             else if (lobby != null && lobby.MatchReady)
             {
-                string boardStatus = ChessRoyale.ChessGameController.Instance != null
-                    ? ChessRoyale.ChessGameController.Instance.StatusMessage
+                string boardStatus = game != null
+                    ? game.StatusMessage
                     : "Both players connected.";
-                statusText.text = $"Room {room.CurrentRoomCode}. You are {seatLabel}.\n{boardStatus}";
+                statusText.text = $"Room {room.CurrentRoomCode}. You are {seatLabel}.\n{boardStatus}{RematchStatus(game, lobby)}{ConfirmationStatus()}";
             }
             else
             {
@@ -183,20 +183,34 @@ namespace ChessRoyale.Networking
 
         public void RequestRematch()
         {
-            ChessFusionRoomManager room = ChessFusionRoomManager.Instance;
-            ChessNetworkGameState state = ChessNetworkGameState.Instance;
-            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
-            bool matchReady = lobby != null && lobby.MatchReady;
-            if (room != null && room.IsConnected && state != null && state.HasStateAuthority && !matchReady)
-            {
-                state.RestartMatch();
-                room.ClearDisconnectNotice();
-                return;
-            }
-
             ChessRoyale.ChessGameController.Instance?.RequestRematch();
-            if (!matchReady)
-                room?.ClearDisconnectNotice();
+        }
+
+        private static string ConfirmationStatus()
+        {
+            ChessNetworkMoveCoordinator coordinator = ChessNetworkMoveCoordinator.Instance;
+            if (coordinator != null && coordinator.IsWaiting)
+                return "\nWaiting for the move to be confirmed.";
+            return string.Empty;
+        }
+
+        private static string RematchStatus(ChessRoyale.ChessGameController game, ChessFusionLobbyState lobby)
+        {
+            if (game == null || game.Outcome == ChessRoyale.ChessGameOutcome.InProgress)
+                return string.Empty;
+            if (lobby == null || !lobby.MatchReady)
+                return "\nRematch waits until both players are seated.";
+
+            ChessNetworkGameState state = ChessNetworkGameState.Instance;
+            if (state == null)
+                return "\nBoth players must agree to rematch.";
+            if (state.LocalPlayerAcceptedRematch && state.OtherPlayerAcceptedRematch)
+                return string.Empty;
+            if (state.LocalPlayerAcceptedRematch)
+                return "\nYou agreed to a rematch. Waiting for the other player.";
+            if (state.OtherPlayerAcceptedRematch)
+                return "\nThe other player agreed to a rematch.";
+            return "\nBoth players must agree to rematch.";
         }
 
         public void CycleLetter(int index)

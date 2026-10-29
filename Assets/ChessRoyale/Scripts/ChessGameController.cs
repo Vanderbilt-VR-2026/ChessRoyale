@@ -62,6 +62,7 @@ namespace ChessRoyale
         private bool networkSessionActive;
         private bool networkMatchReady;
         private bool networkHasSeat;
+        private bool networkAwaitingAuthority;
         private ChessPieceColor networkSeatColor;
 
         public event System.Action GameReset;
@@ -126,12 +127,27 @@ namespace ChessRoyale
             networkMatchReady = matchReady;
             networkHasSeat = hasSeat;
             networkSeatColor = seatColor;
+            if (!inRoom)
+                networkAwaitingAuthority = false;
+            if (!changed && !inRoom)
+                RefreshTurnInteraction();
             if (!changed)
                 return;
 
             if (inRoom && !matchReady)
                 ClearMoveHints();
             RefreshPromotionPresentation();
+            RefreshTurnInteraction();
+        }
+
+        public void SetAwaitingAuthority(bool waiting)
+        {
+            if (networkAwaitingAuthority == waiting)
+                return;
+
+            networkAwaitingAuthority = waiting;
+            if (waiting)
+                ClearMoveHints();
             RefreshTurnInteraction();
         }
 
@@ -238,8 +254,11 @@ namespace ChessRoyale
 
         public void RequestRematch()
         {
-            if (networkSessionActive && networkMatchReady)
+            if (networkSessionActive)
             {
+                if (!networkMatchReady || outcome == ChessGameOutcome.InProgress)
+                    return;
+
                 RematchRequested?.Invoke();
                 return;
             }
@@ -918,7 +937,7 @@ namespace ChessRoyale
 
         private void RefreshTurnInteraction()
         {
-            bool gameAcceptsMoves = outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null;
+            bool gameAcceptsMoves = outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null && !(networkSessionActive && networkAwaitingAuthority);
             foreach (ChessPieceInteractable piece in pieces)
                 piece.SetTurnEnabled(gameAcceptsMoves && CanLocalPlayerMove(piece));
         }

@@ -25,6 +25,17 @@ namespace ChessRoyale.Networking
         [Networked] private Quaternion RightHandRotation { get; set; }
 
         private bool remoteMarkersCreated;
+        private bool remoteColored;
+        private Renderer bodyRenderer;
+        private Vector3 shownRootPosition;
+        private Quaternion shownRootRotation;
+        private Vector3 shownHeadPosition;
+        private Quaternion shownHeadRotation;
+        private Vector3 shownLeftPosition;
+        private Quaternion shownLeftRotation;
+        private Vector3 shownRightPosition;
+        private Quaternion shownRightRotation;
+        private bool hasShownPose;
 
         public bool IsLocalPlayer => Object != null && Object.IsValid && Object.HasInputAuthority;
         public Camera XrCamera => xrCamera;
@@ -76,12 +87,24 @@ namespace ChessRoyale.Networking
             if (IsLocalPlayer || Object == null || !Object.IsValid || !HasPose)
                 return;
 
-            transform.SetPositionAndRotation(RootPosition, RootRotation);
-            ApplyPose(head, HeadPosition, HeadRotation);
-            ApplyPose(leftHand, LeftHandPosition, LeftHandRotation);
-            ApplyPose(rightHand, RightHandPosition, RightHandRotation);
+            float blend = hasShownPose ? 1f - Mathf.Exp(-Time.deltaTime * 14f) : 1f;
+            shownRootPosition = Vector3.Lerp(hasShownPose ? shownRootPosition : RootPosition, RootPosition, blend);
+            shownRootRotation = Quaternion.Slerp(hasShownPose ? shownRootRotation : RootRotation, RootRotation, blend);
+            shownHeadPosition = Vector3.Lerp(hasShownPose ? shownHeadPosition : HeadPosition, HeadPosition, blend);
+            shownHeadRotation = Quaternion.Slerp(hasShownPose ? shownHeadRotation : HeadRotation, HeadRotation, blend);
+            shownLeftPosition = Vector3.Lerp(hasShownPose ? shownLeftPosition : LeftHandPosition, LeftHandPosition, blend);
+            shownLeftRotation = Quaternion.Slerp(hasShownPose ? shownLeftRotation : LeftHandRotation, LeftHandRotation, blend);
+            shownRightPosition = Vector3.Lerp(hasShownPose ? shownRightPosition : RightHandPosition, RightHandPosition, blend);
+            shownRightRotation = Quaternion.Slerp(hasShownPose ? shownRightRotation : RightHandRotation, RightHandRotation, blend);
+            hasShownPose = true;
+
+            transform.SetPositionAndRotation(shownRootPosition, shownRootRotation);
+            ApplyPose(head, shownHeadPosition, shownHeadRotation);
+            ApplyPose(leftHand, shownLeftPosition, shownLeftRotation);
+            ApplyPose(rightHand, shownRightPosition, shownRightRotation);
             if (!remoteMarkersCreated)
                 EnsureRemoteMarkers();
+            ColorRemoteBody();
         }
 
         private void ApplyOwnership()
@@ -112,38 +135,60 @@ namespace ChessRoyale.Networking
             if (remoteMarkersCreated || IsLocalPlayer)
                 return;
 
-            AddMarker(head, 0.22f, new Color(0.93f, 0.86f, 0.62f));
-            AddMarker(leftHand, 0.1f, new Color(0.25f, 0.55f, 1f));
-            AddMarker(rightHand, 0.1f, new Color(0.25f, 0.55f, 1f));
+            bodyRenderer = AddMarker(transform, new Color(0.75f, 0.75f, 0.78f), new Vector3(0f, 1f, 0f), new Vector3(0.45f, 0.9f, 0.45f), PrimitiveType.Capsule);
+            AddMarker(head, new Color(0.93f, 0.86f, 0.62f), Vector3.zero, Vector3.one * 0.28f, PrimitiveType.Sphere);
+            AddMarker(leftHand, new Color(0.25f, 0.55f, 1f), Vector3.zero, Vector3.one * 0.12f, PrimitiveType.Sphere);
+            AddMarker(rightHand, new Color(0.25f, 0.55f, 1f), Vector3.zero, Vector3.one * 0.12f, PrimitiveType.Sphere);
             remoteMarkersCreated = true;
         }
 
-        private static void AddMarker(Transform parent, float diameter, Color color)
+        private void ColorRemoteBody()
         {
-            if (parent == null)
+            if (remoteColored || bodyRenderer == null || Runner == null || Object == null)
                 return;
 
-            GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            if (lobby == null)
+                return;
+
+            bool white = Object.InputAuthority == lobby.WhitePlayer;
+            bool black = Object.InputAuthority == lobby.BlackPlayer;
+            if (!white && !black)
+                return;
+
+            remoteColored = true;
+            bodyRenderer.material.color = white
+                ? new Color(0.92f, 0.92f, 0.9f)
+                : new Color(0.16f, 0.16f, 0.18f);
+        }
+
+        private static Renderer AddMarker(Transform parent, Color color, Vector3 localPosition, Vector3 localScale, PrimitiveType primitive)
+        {
+            if (parent == null)
+                return null;
+
+            GameObject marker = GameObject.CreatePrimitive(primitive);
             marker.name = "Remote Pose Marker";
             marker.transform.SetParent(parent, false);
-            marker.transform.localPosition = Vector3.zero;
+            marker.transform.localPosition = localPosition;
             marker.transform.localRotation = Quaternion.identity;
-            marker.transform.localScale = Vector3.one * diameter;
+            marker.transform.localScale = localScale;
             Collider collider = marker.GetComponent<Collider>();
             if (collider != null)
                 Destroy(collider);
 
             Renderer renderer = marker.GetComponent<Renderer>();
             if (renderer == null)
-                return;
+                return null;
 
             Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
             if (shader == null)
                 shader = Shader.Find("Unlit/Color");
             if (shader == null)
-                return;
+                return renderer;
 
             renderer.material = new Material(shader) { color = color };
+            return renderer;
         }
 
         private Transform FindNamedChild(string childName)
