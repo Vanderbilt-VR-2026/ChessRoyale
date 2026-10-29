@@ -16,8 +16,9 @@ The current Sprint 2 stack includes:
 - Boundary-glow hints around valid destination squares.
 - Check, checkmate, stalemate, repetition, fifty-move, and insufficient-material draws.
 - Castling, en passant, and in-world pawn-promotion selection.
+- Photon Fusion shared-mode multiplayer for two players, with four-letter rooms, White and Black seats, synced moves, a shared chess clock, and a rematch that starts only after both players agree.
 
-This stack currently builds directly into `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity`. A start screen, end screen, sound, teleportation, and networked multiplayer are not part of this branch stack yet.
+This stack builds the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity`, including board teleportation and networked play. An end screen and background sound are not part of this branch yet.
 
 ## VR controls
 

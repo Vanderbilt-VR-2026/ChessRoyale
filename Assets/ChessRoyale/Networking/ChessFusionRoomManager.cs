@@ -274,6 +274,24 @@ namespace ChessRoyale.Networking
                 Destroy(runnerObject);
         }
 
+        private static bool IsLocalConnectionFailure(ShutdownReason reason)
+        {
+            switch (reason)
+            {
+                case ShutdownReason.Error:
+                case ShutdownReason.PhotonCloudTimeout:
+                case ShutdownReason.ConnectionTimeout:
+                case ShutdownReason.ConnectionRefused:
+                case ShutdownReason.OperationTimeout:
+                case ShutdownReason.InvalidAuthentication:
+                case ShutdownReason.CustomAuthenticationFailed:
+                case ShutdownReason.AuthenticationTicketExpired:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         private static string DescribeStartFailure(bool createRoom, string roomCode, ShutdownReason reason)
         {
             string action = createRoom ? "create" : "join";
@@ -384,7 +402,13 @@ namespace ChessRoyale.Networking
             CurrentRoomCode = null;
             RestoreSceneRigs();
             SyncNetworkPlay();
-            if (!leavingIntentionally && gameUnderway)
+            if (!leavingIntentionally && IsLocalConnectionFailure(shutdownReason))
+            {
+                DisconnectNotice = "Your connection to the room failed.";
+                LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
+                Debug.LogWarning(LastError, this);
+            }
+            else if (!leavingIntentionally && gameUnderway)
             {
                 ChessRoyale.ChessPieceColor disconnected = seat == ChessSeat.Black
                     ? ChessRoyale.ChessPieceColor.White
