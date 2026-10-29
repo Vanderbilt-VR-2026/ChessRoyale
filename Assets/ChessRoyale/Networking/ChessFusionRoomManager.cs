@@ -47,19 +47,48 @@ namespace ChessRoyale.Networking
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureSceneRoomManager()
         {
-            if (Instance != null)
-                return;
-
             Scene scene = SceneManager.GetActiveScene();
-            if (scene.name != "ChessRoyaleVR")
+            if (!MainMenu.LaunchMultiplayer)
+            {
+                if (scene.name == "ChessRoyaleVR")
+                    DropNetworkingForSinglePlayer();
+                return;
+            }
+
+            if (Instance != null || scene.name != "ChessRoyaleVR")
                 return;
 
             GameObject roomObject = new GameObject("Chess Fusion Room");
             roomObject.AddComponent<ChessFusionRoomManager>();
         }
 
+        private static void DropNetworkingForSinglePlayer()
+        {
+            if (Instance != null)
+            {
+                ChessFusionRoomManager leftover = Instance;
+                _ = leftover.LeaveRoom();
+                Destroy(leftover.gameObject);
+            }
+
+            ChessFusionLobbyUI[] lobbies = FindObjectsByType<ChessFusionLobbyUI>(FindObjectsSortMode.None);
+            foreach (ChessFusionLobbyUI lobby in lobbies)
+            {
+                if (lobby != null)
+                    Destroy(lobby.gameObject);
+            }
+
+            ChessRoyale.ChessGameController.Instance?.SetNetworkPlay(false, false, false, ChessRoyale.ChessPieceColor.White);
+        }
+
         private void Awake()
         {
+            if (!MainMenu.LaunchMultiplayer)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
@@ -474,7 +503,7 @@ namespace ChessRoyale.Networking
 
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
             ChessSeat seat = lobby != null ? lobby.LocalSeat : ChessSeat.None;
-            if (seat == ChessSeat.None)
+            if (lobby == null || !lobby.MatchReady || seat == ChessSeat.None)
             {
                 spawnWhenSeated = true;
                 return;

@@ -59,6 +59,7 @@ namespace ChessRoyale.Networking
         public override void Spawned()
         {
             ApplyOwnership();
+            ChessRoyale.ChessPlayerHands.Apply(transform);
             if (!IsLocalPlayer)
                 EnsureRemoteMarkers();
         }
@@ -137,8 +138,6 @@ namespace ChessRoyale.Networking
 
             bodyRenderer = AddMarker(transform, new Color(0.75f, 0.75f, 0.78f), new Vector3(0f, 1f, 0f), new Vector3(0.45f, 0.9f, 0.45f), PrimitiveType.Capsule);
             AddMarker(head, new Color(0.93f, 0.86f, 0.62f), Vector3.zero, Vector3.one * 0.28f, PrimitiveType.Sphere);
-            AddMarker(leftHand, new Color(0.25f, 0.55f, 1f), Vector3.zero, Vector3.one * 0.12f, PrimitiveType.Sphere);
-            AddMarker(rightHand, new Color(0.25f, 0.55f, 1f), Vector3.zero, Vector3.one * 0.12f, PrimitiveType.Sphere);
             remoteMarkersCreated = true;
         }
 
