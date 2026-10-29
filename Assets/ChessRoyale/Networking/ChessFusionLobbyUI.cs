@@ -124,7 +124,10 @@ namespace ChessRoyale.Networking
             }
             else if (lobby != null && lobby.MatchReady)
             {
-                statusText.text = $"Room {room.CurrentRoomCode}. You are {seatLabel}.\nOpponent connected. Piece grabs stay paused until networked moves are added.";
+                string boardStatus = ChessRoyale.ChessGameController.Instance != null
+                    ? ChessRoyale.ChessGameController.Instance.StatusMessage
+                    : "Both players connected.";
+                statusText.text = $"Room {room.CurrentRoomCode}. You are {seatLabel}.\n{boardStatus}";
             }
             else
             {
@@ -170,6 +173,11 @@ namespace ChessRoyale.Networking
             _ = ChessFusionRoomManager.Instance.LeaveRoom();
         }
 
+        public void RequestRematch()
+        {
+            ChessRoyale.ChessGameController.Instance?.RequestRematch();
+        }
+
         public void CycleLetter(int index)
         {
             if (index < 0 || index >= joinLetters.Length)
@@ -202,7 +210,7 @@ namespace ChessRoyale.Networking
             gameObject.AddComponent<TrackedDeviceGraphicRaycaster>();
 
             RectTransform rect = gameObject.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(920f, 620f);
+            rect.sizeDelta = new Vector2(920f, 760f);
             rect.localScale = Vector3.one * 0.0014f;
 
             Image background = gameObject.AddComponent<Image>();
@@ -215,17 +223,18 @@ namespace ChessRoyale.Networking
             CreateButton("CREATE", new Vector2(-230f, -40f), CreateRoom);
             CreateButton("JOIN", new Vector2(0f, -40f), JoinRoom);
             CreateButton("LEAVE", new Vector2(230f, -40f), LeaveRoom);
+            CreateButton("REMATCH", new Vector2(0f, -120f), RequestRematch);
 
             letterLabels = new Text[ChessNetworkTypes.RoomCodeLength];
             for (int index = 0; index < letterLabels.Length; index++)
             {
                 int letterIndex = index;
                 float x = -180f + index * 120f;
-                letterLabels[index] = CreateText("A", new Vector2(x, -150f), new Vector2(90f, 60f), 34);
-                CreateButton("+", new Vector2(x, -230f), () => CycleLetter(letterIndex), new Vector2(80f, 54f));
+                letterLabels[index] = CreateText("A", new Vector2(x, -210f), new Vector2(90f, 60f), 34);
+                CreateButton("+", new Vector2(x, -280f), () => CycleLetter(letterIndex), new Vector2(80f, 54f));
             }
 
-            codeInput = CreateCodeInput(new Vector2(0f, -290f));
+            codeInput = CreateCodeInput(new Vector2(0f, -345f));
         }
 
         private Text CreateText(string value, Vector2 position, Vector2 size, int fontSize)

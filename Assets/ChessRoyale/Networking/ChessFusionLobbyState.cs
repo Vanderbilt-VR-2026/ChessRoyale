@@ -62,6 +62,7 @@ namespace ChessRoyale.Networking
             }
 
             bool ready = black != PlayerRef.None;
+            bool becameReady = ready && !MatchReady;
             if (MatchReady && !ready)
                 OpponentLeft = true;
             if (ready)
@@ -70,6 +71,9 @@ namespace ChessRoyale.Networking
             WhitePlayer = white;
             BlackPlayer = black;
             MatchReady = ready;
+            ChessNetworkGameState.Instance?.SetSeats(white, black, ready);
+            if (becameReady)
+                ChessNetworkGameState.Instance?.PublishInitialBoard();
         }
 
         public static string SeatLabel(ChessSeat seat)

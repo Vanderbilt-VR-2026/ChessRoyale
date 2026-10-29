@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ChessRoyale.Networking;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 
@@ -45,6 +46,7 @@ namespace ChessRoyale
         private float baseOffset;
         private bool moveAllowed;
         private bool captured;
+        private bool holdDropPresentation;
         private bool boardSettlementPending;
         private Bounds boardBounds;
         private bool hasBoardBounds;
@@ -52,8 +54,10 @@ namespace ChessRoyale
         public ChessPieceColor PieceColor => pieceColor;
         public ChessPieceType PieceType => pieceType;
         public ChessBoardSquare CurrentSquare => currentSquare;
+        public ChessBoardSquare StartingSquare => startingSquare;
         public bool HasMoved => hasMoved;
         public bool IsCaptured => captured;
+        public byte PieceId { get; private set; } = byte.MaxValue;
 
         public void Initialize(ChessPieceColor color, ChessPieceType type)
         {
@@ -84,6 +88,7 @@ namespace ChessRoyale
         {
             startingSquare = ChessBoardSquare.FindClosest(startingPosition, MaximumSquareDropDistance);
             currentSquare = startingSquare;
+            AssignStableId();
             ChessGameController.Instance?.RegisterPiece(this, startingSquare);
         }
 
@@ -115,7 +120,7 @@ namespace ChessRoyale
                 return;
             }
 
-            if (captured || currentSquare == null || grabInteractable == null || grabInteractable.isSelected)
+            if (captured || holdDropPresentation || currentSquare == null || grabInteractable == null || grabInteractable.isSelected)
                 return;
 
             Vector3 restingPosition = GetRestingPosition(currentSquare);
@@ -131,8 +136,13 @@ namespace ChessRoyale
         private void OnGrabbed(SelectEnterEventArgs _)
         {
             grabOriginSquare = currentSquare;
+            holdDropPresentation = false;
             hasBoardBounds = ChessBoardSquare.TryGetBoardBounds(out boardBounds);
-            moveAllowed = ChessGameController.Instance == null || ChessGameController.Instance.BeginMove(this);
+            ChessNetworkMoveCoordinator coordinator = ChessNetworkMoveCoordinator.Instance;
+            if (coordinator != null && coordinator.IsOnline)
+                moveAllowed = coordinator.BeginLocalGrab(this);
+            else
+                moveAllowed = ChessGameController.Instance == null || ChessGameController.Instance.BeginMove(this);
             boardSettlementPending = true;
             StopMotion();
             body.rotation = startingRotation;
@@ -141,6 +151,13 @@ namespace ChessRoyale
         private void OnReleased(SelectExitEventArgs _)
         {
             ChessBoardSquare destination = ChessBoardSquare.FindClosest(transform.position, MaximumSquareDropDistance);
+            ChessNetworkMoveCoordinator coordinator = ChessNetworkMoveCoordinator.Instance;
+            if (coordinator != null && coordinator.IsOnline)
+            {
+                coordinator.SubmitReleasedMove(this, grabOriginSquare, destination, moveAllowed);
+                return;
+            }
+
             ChessGameController game = ChessGameController.Instance;
             if (!moveAllowed || destination == null)
             {
@@ -206,6 +223,56 @@ namespace ChessRoyale
             }
         }
 
+        public void SetDropHold(bool hold)
+        {
+            holdDropPresentation = hold;
+        }
+
+        public void SnapBackToCurrentSquare()
+        {
+            holdDropPresentation = false;
+            boardSettlementPending = true;
+            SnapToSquare(currentSquare ?? grabOriginSquare ?? startingSquare);
+        }
+
+        public void ApplyAuthoritativeState(ChessBoardSquare square, ChessPieceType type, bool moved, bool isCaptured)
+        {
+            holdDropPresentation = false;
+            boardSettlementPending = true;
+            if (isCaptured)
+            {
+                if (pieceType != startingPieceType && type == startingPieceType)
+                    RestoreStartingAppearance();
+                hasMoved = moved;
+                currentSquare = null;
+                if (!captured)
+                    Capture();
+                else if (gameObject.activeSelf)
+                    gameObject.SetActive(false);
+                return;
+            }
+
+            if (captured || !gameObject.activeSelf)
+            {
+                captured = false;
+                gameObject.SetActive(true);
+            }
+
+            if (type == startingPieceType)
+            {
+                if (pieceType != startingPieceType)
+                    RestoreStartingAppearance();
+            }
+            else if (pieceType != type)
+            {
+                PromoteTo(type);
+            }
+
+            hasMoved = moved;
+            if (square != null)
+                SnapToSquare(square);
+        }
+
         public void SetTurnEnabled(bool enabled)
         {
             if (grabInteractable != null && !captured)
@@ -253,6 +320,18 @@ namespace ChessRoyale
             }
 
             return false;
+        }
+
+        private void AssignStableId()
+        {
+            if (startingSquare == null)
+                return;
+
+            int file = startingSquare.FileIndex;
+            if (pieceColor == ChessPieceColor.White)
+                PieceId = (byte)(startingSquare.RankIndex == 0 ? file : 8 + file);
+            else
+                PieceId = (byte)(startingSquare.RankIndex == 7 ? 24 + file : 16 + file);
         }
 
         private void SnapToSquare(ChessBoardSquare square)

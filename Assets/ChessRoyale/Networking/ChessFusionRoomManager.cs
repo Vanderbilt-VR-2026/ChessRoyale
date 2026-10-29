@@ -61,12 +61,24 @@ namespace ChessRoyale.Networking
             }
 
             Instance = this;
+            if (GetComponent<ChessNetworkMoveCoordinator>() == null)
+                gameObject.AddComponent<ChessNetworkMoveCoordinator>();
         }
 
         private void LateUpdate()
         {
-            if (IsConnected)
-                ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(true);
+            SyncNetworkPlay();
+        }
+
+        private void SyncNetworkPlay()
+        {
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            bool ready = IsConnected && lobby != null && lobby.MatchReady;
+            bool seated = IsConnected && lobby != null && lobby.LocalSeat != ChessSeat.None;
+            ChessRoyale.ChessPieceColor seat = lobby != null && lobby.LocalSeat == ChessSeat.Black
+                ? ChessRoyale.ChessPieceColor.Black
+                : ChessRoyale.ChessPieceColor.White;
+            ChessRoyale.ChessGameController.Instance?.SetNetworkPlay(IsConnected, ready, seated, seat);
         }
 
         public Task<bool> CreateRoom(string roomCode)
@@ -92,7 +104,7 @@ namespace ChessRoyale.Networking
             {
                 leavingIntentionally = false;
                 RestoreSceneRigs();
-                ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(false);
+                SyncNetworkPlay();
                 return;
             }
 
@@ -112,7 +124,7 @@ namespace ChessRoyale.Networking
                     Destroy(runnerToShutdown.gameObject);
                 leavingIntentionally = false;
                 RestoreSceneRigs();
-                ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(false);
+                SyncNetworkPlay();
             }
 
             Debug.Log("Left Chess Royale Fusion session.", this);
@@ -204,7 +216,7 @@ namespace ChessRoyale.Networking
                 }
 
                 CurrentRoomCode = roomCode;
-                ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(true);
+                SyncNetworkPlay();
                 SpawnLobbyState();
                 SpawnLocalPlayer();
                 Debug.Log(
@@ -326,7 +338,7 @@ namespace ChessRoyale.Networking
             string roomCode = CurrentRoomCode;
             CurrentRoomCode = null;
             RestoreSceneRigs();
-            ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(false);
+            SyncNetworkPlay();
             if (!leavingIntentionally && shutdownReason != ShutdownReason.Ok)
             {
                 DisconnectNotice = "The room closed because the other player disconnected.";
@@ -350,7 +362,7 @@ namespace ChessRoyale.Networking
             if (callbackRunner != runner || !IsConnected)
                 return;
 
-            ChessRoyale.ChessGameController.Instance?.SetNetworkRoomOpen(true);
+            SyncNetworkPlay();
             SpawnLobbyState();
             SpawnLocalPlayer();
         }
