@@ -92,3 +92,5 @@ MonoBehaviour:
   _EnPassantSquareIndex: 0
   _EnPassantPawnId: 0
   _HalfmoveClock: 0
+  _WhiteTimeMs: 0
+  _BlackTimeMs: 0

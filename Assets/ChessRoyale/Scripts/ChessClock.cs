@@ -1,3 +1,4 @@
+using ChessRoyale.Networking;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -36,8 +37,19 @@ namespace ChessRoyale
         private Text blackText;
         private Text statusText;
 
+        public static ChessClock Instance { get; private set; }
+
+        public int StartingTimeMs => Mathf.Max(1, Mathf.RoundToInt(minutesPerSide * 60f * 1000f));
+
         private void Awake()
         {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(this);
+                return;
+            }
+
+            Instance = this;
             ResetClock();
             BuildPanel();
         }
@@ -51,8 +63,16 @@ namespace ChessRoyale
 
         private void OnDestroy()
         {
+            if (Instance == this)
+                Instance = null;
             if (game != null)
                 game.GameReset -= ResetClock;
+        }
+
+        public void ApplyNetworkTime(int whiteMs, int blackMs)
+        {
+            whiteSeconds = Mathf.Max(0, whiteMs) / 1000f;
+            blackSeconds = Mathf.Max(0, blackMs) / 1000f;
         }
 
         public void ResetClock()
@@ -65,6 +85,13 @@ namespace ChessRoyale
         {
             if (game == null)
                 return;
+
+            if (InNetworkRoom)
+            {
+                ApplyAuthoritativeClock();
+                UpdateDisplay();
+                return;
+            }
 
             if (game.Outcome == ChessGameOutcome.InProgress)
             {
@@ -89,6 +116,23 @@ namespace ChessRoyale
             }
 
             UpdateDisplay();
+        }
+
+        private static bool InNetworkRoom =>
+            ChessFusionRoomManager.Instance != null && ChessFusionRoomManager.Instance.IsConnected;
+
+        private void ApplyAuthoritativeClock()
+        {
+            ChessNetworkGameState state = ChessNetworkGameState.Instance;
+            int whiteMs = state != null ? state.WhiteTimeMs : 0;
+            int blackMs = state != null ? state.BlackTimeMs : 0;
+            if (whiteMs <= 0 && blackMs <= 0)
+            {
+                whiteMs = StartingTimeMs;
+                blackMs = StartingTimeMs;
+            }
+
+            ApplyNetworkTime(whiteMs, blackMs);
         }
 
         private void LateUpdate()

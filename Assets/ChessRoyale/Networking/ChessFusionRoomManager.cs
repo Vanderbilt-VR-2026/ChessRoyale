@@ -33,6 +33,11 @@ namespace ChessRoyale.Networking
         public string CurrentRoomCode { get; private set; }
         public string LastError { get; private set; }
         public string DisconnectNotice { get; private set; }
+
+        public void ClearDisconnectNotice()
+        {
+            DisconnectNotice = null;
+        }
         public bool IsConnected => runner != null && runner.IsRunning;
         public bool IsSharedModeMasterClient => IsConnected && runner.IsSharedModeMasterClient;
         public int PlayerCount => IsConnected ? runner.ActivePlayers.Count() : 0;
@@ -323,9 +328,34 @@ namespace ChessRoyale.Networking
 
             Debug.Log($"Fusion player {player} left room '{CurrentRoomCode}' ({PlayerCount}/{MaximumPlayers}).", this);
             if (player != callbackRunner.LocalPlayer)
-                DisconnectNotice = "The other player disconnected.";
+                RecordOpponentDisconnect(callbackRunner, player);
             if (callbackRunner.IsSharedModeMasterClient)
                 ChessFusionLobbyState.Instance?.RefreshAssignments();
+        }
+
+        private void RecordOpponentDisconnect(NetworkRunner callbackRunner, PlayerRef player)
+        {
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            ChessRoyale.ChessGameController game = ChessRoyale.ChessGameController.Instance;
+            ChessNetworkGameState state = ChessNetworkGameState.Instance;
+            bool gameUnderway = lobby != null
+                && lobby.MatchReady
+                && game != null
+                && game.Outcome == ChessRoyale.ChessGameOutcome.InProgress
+                && state != null
+                && state.MoveSequence > 1;
+
+            if (gameUnderway && callbackRunner.IsSharedModeMasterClient)
+            {
+                ChessRoyale.ChessPieceColor disconnected = player == lobby.WhitePlayer
+                    ? ChessRoyale.ChessPieceColor.White
+                    : ChessRoyale.ChessPieceColor.Black;
+                state.PublishDisconnect(disconnected);
+                DisconnectNotice = game.StatusMessage;
+                return;
+            }
+
+            DisconnectNotice = "The other player disconnected.";
         }
 
         public void OnShutdown(NetworkRunner callbackRunner, ShutdownReason shutdownReason)
@@ -333,13 +363,36 @@ namespace ChessRoyale.Networking
             if (callbackRunner != runner)
                 return;
 
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            ChessRoyale.ChessGameController game = ChessRoyale.ChessGameController.Instance;
+            ChessSeat seat = lobby != null ? lobby.LocalSeat : ChessSeat.None;
+            bool gameUnderway = lobby != null
+                && lobby.MatchReady
+                && game != null
+                && game.Outcome == ChessRoyale.ChessGameOutcome.InProgress
+                && ChessNetworkGameState.Instance != null
+                && ChessNetworkGameState.Instance.MoveSequence > 1;
+
             runner = null;
             localPlayer = null;
             string roomCode = CurrentRoomCode;
             CurrentRoomCode = null;
             RestoreSceneRigs();
             SyncNetworkPlay();
-            if (!leavingIntentionally && shutdownReason != ShutdownReason.Ok)
+            if (leavingIntentionally)
+                return;
+
+            if (gameUnderway)
+            {
+                ChessRoyale.ChessPieceColor disconnected = seat == ChessSeat.Black
+                    ? ChessRoyale.ChessPieceColor.White
+                    : ChessRoyale.ChessPieceColor.Black;
+                game.EndByDisconnect(disconnected);
+                DisconnectNotice = game.StatusMessage + " The room is closed.";
+                return;
+            }
+
+            if (shutdownReason != ShutdownReason.Ok)
             {
                 DisconnectNotice = "The room closed because the other player disconnected.";
                 LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";

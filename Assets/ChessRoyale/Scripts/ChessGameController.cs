@@ -15,6 +15,8 @@ namespace ChessRoyale
         DrawFiftyMoveRule,
         WhiteWinsOnTime,
         BlackWinsOnTime,
+        WhiteWinsByDisconnect,
+        BlackWinsByDisconnect,
     }
 
     [DisallowMultipleComponent]
@@ -236,7 +238,7 @@ namespace ChessRoyale
 
         public void RequestRematch()
         {
-            if (networkSessionActive)
+            if (networkSessionActive && networkMatchReady)
             {
                 RematchRequested?.Invoke();
                 return;
@@ -366,6 +368,24 @@ namespace ChessRoyale
 
             outcome = flagged == ChessPieceColor.White ? ChessGameOutcome.BlackWinsOnTime : ChessGameOutcome.WhiteWinsOnTime;
             statusMessage = flagged == ChessPieceColor.White ? "Black wins on time" : "White wins on time";
+            Debug.Log($"Chess Royale result: {statusMessage}");
+            RefreshTurnInteraction();
+        }
+
+        public void EndByDisconnect(ChessPieceColor disconnected)
+        {
+            if (outcome != ChessGameOutcome.InProgress)
+                return;
+
+            ClearMoveHints();
+            ClearCheckSignal();
+            pendingPromotionPiece = null;
+            if (promotionPanel != null)
+                promotionPanel.SetActive(false);
+
+            bool whiteLeft = disconnected == ChessPieceColor.White;
+            outcome = whiteLeft ? ChessGameOutcome.BlackWinsByDisconnect : ChessGameOutcome.WhiteWinsByDisconnect;
+            statusMessage = whiteLeft ? "White disconnected. Black wins." : "Black disconnected. White wins.";
             Debug.Log($"Chess Royale result: {statusMessage}");
             RefreshTurnInteraction();
         }
@@ -809,6 +829,10 @@ namespace ChessRoyale
                     return "White wins on time";
                 case ChessGameOutcome.BlackWinsOnTime:
                     return "Black wins on time";
+                case ChessGameOutcome.WhiteWinsByDisconnect:
+                    return "Black disconnected. White wins.";
+                case ChessGameOutcome.BlackWinsByDisconnect:
+                    return "White disconnected. Black wins.";
                 default:
                     return $"{sideToMove} to move";
             }

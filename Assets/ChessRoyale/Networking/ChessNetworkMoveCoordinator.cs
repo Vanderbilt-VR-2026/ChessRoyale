@@ -105,9 +105,10 @@ namespace ChessRoyale.Networking
 
         private void SubmitRematch()
         {
-            if (!IsOnline || requestInFlight)
+            if (!IsOnline)
                 return;
 
+            requestInFlight = false;
             ChessNetworkGameState.Instance.RequestReset();
         }
 

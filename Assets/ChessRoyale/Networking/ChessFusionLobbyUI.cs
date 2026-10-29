@@ -101,7 +101,7 @@ namespace ChessRoyale.Networking
             if (room == null || !room.IsConnected)
             {
                 if (!string.IsNullOrEmpty(room?.DisconnectNotice))
-                    statusText.text = room.DisconnectNotice + "\nOffline chess is active.";
+                    statusText.text = room.DisconnectNotice;
                 else if (!string.IsNullOrEmpty(room?.LastError))
                     statusText.text = room.LastError;
                 else
@@ -114,7 +114,15 @@ namespace ChessRoyale.Networking
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
             ChessSeat seat = lobby != null ? lobby.LocalSeat : (room.IsSharedModeMasterClient ? ChessSeat.White : ChessSeat.Black);
             string seatLabel = ChessFusionLobbyState.SeatLabel(seat);
-            if (!string.IsNullOrEmpty(room.DisconnectNotice))
+            ChessRoyale.ChessGameController game = ChessRoyale.ChessGameController.Instance;
+            bool disconnectResult = game != null &&
+                (game.Outcome == ChessRoyale.ChessGameOutcome.WhiteWinsByDisconnect ||
+                 game.Outcome == ChessRoyale.ChessGameOutcome.BlackWinsByDisconnect);
+            if (disconnectResult)
+            {
+                statusText.text = $"Room {room.CurrentRoomCode}. You are {seatLabel}.\n{game.StatusMessage}";
+            }
+            else if (!string.IsNullOrEmpty(room.DisconnectNotice))
             {
                 statusText.text = $"Room {room.CurrentRoomCode}. You are {seatLabel}.\n{room.DisconnectNotice}";
             }
@@ -175,7 +183,20 @@ namespace ChessRoyale.Networking
 
         public void RequestRematch()
         {
+            ChessFusionRoomManager room = ChessFusionRoomManager.Instance;
+            ChessNetworkGameState state = ChessNetworkGameState.Instance;
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            bool matchReady = lobby != null && lobby.MatchReady;
+            if (room != null && room.IsConnected && state != null && state.HasStateAuthority && !matchReady)
+            {
+                state.RestartMatch();
+                room.ClearDisconnectNotice();
+                return;
+            }
+
             ChessRoyale.ChessGameController.Instance?.RequestRematch();
+            if (!matchReady)
+                room?.ClearDisconnectNotice();
         }
 
         public void CycleLetter(int index)

@@ -71,9 +71,10 @@ namespace ChessRoyale.Networking
             WhitePlayer = white;
             BlackPlayer = black;
             MatchReady = ready;
-            ChessNetworkGameState.Instance?.SetSeats(white, black, ready);
-            if (becameReady)
-                ChessNetworkGameState.Instance?.PublishInitialBoard();
+            ChessNetworkGameState state = ChessNetworkGameState.Instance;
+            state?.SetSeats(white, black, ready);
+            if (becameReady && state != null && state.MoveSequence == 0)
+                state.PublishInitialBoard();
         }
 
         public static string SeatLabel(ChessSeat seat)
