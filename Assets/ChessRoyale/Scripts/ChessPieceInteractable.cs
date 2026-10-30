@@ -29,6 +29,10 @@ namespace ChessRoyale
         private const float BoardElevationTolerance = 0.01f;
         private static readonly HashSet<ChessPieceInteractable> ActivePieces = new HashSet<ChessPieceInteractable>();
 
+        // Raised when a piece leaves / returns to the board, so the captured-piece stands can follow.
+        public static event System.Action<ChessPieceInteractable> PieceCaptured;
+        public static event System.Action<ChessPieceInteractable> PieceRestored;
+
         [SerializeField] private ChessPieceColor pieceColor;
         [SerializeField] private ChessPieceType pieceType;
         [SerializeField] private ChessBoardSquare currentSquare;
@@ -235,7 +239,10 @@ namespace ChessRoyale
 
             StopMotion();
             hasMoved = false;
+            bool wasCaptured = captured;
             captured = false;
+            if (wasCaptured)
+                PieceRestored?.Invoke(this);
             boardSettlementPending = false;
             smoothing = false;
             predictedSquare = null;
@@ -302,8 +309,11 @@ namespace ChessRoyale
 
             if (captured || !gameObject.activeSelf)
             {
+                bool wasCaptured = captured;
                 captured = false;
                 gameObject.SetActive(true);
+                if (wasCaptured)
+                    PieceRestored?.Invoke(this);
             }
 
             if (type == startingPieceType)
@@ -363,6 +373,7 @@ namespace ChessRoyale
             boardSettlementPending = false;
             StopMotion();
             gameObject.SetActive(false);
+            PieceCaptured?.Invoke(this);
         }
 
         public void MoveToSquare(ChessBoardSquare square, bool markMoved = true)
