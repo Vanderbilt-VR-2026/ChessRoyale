@@ -482,7 +482,8 @@ namespace ChessRoyale.Networking
             CreateText(chooseRoot.transform, "Join a room or create one.", new Vector2(0f, 80f), new Vector2(860f, 60f), 28);
             CreateButton(chooseRoot.transform, "CREATE", new Vector2(-160f, -40f), BeginCreate);
             CreateButton(chooseRoot.transform, "JOIN", new Vector2(160f, -40f), ShowJoin);
-            CreateButton(chooseRoot.transform, "LEAVE", new Vector2(0f, -160f), LeaveLobbyToMenu);
+            // Top-right corner of the 920 x 1040 panel, away from CREATE / JOIN.
+            CreateButton(chooseRoot.transform, "LEAVE", new Vector2(320f, 464f), LeaveLobbyToMenu);
 
             createRoot = CreatePage("Create");
             CreateText(createRoot.transform, "Your room code", new Vector2(0f, 180f), new Vector2(860f, 70f), 36);

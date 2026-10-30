@@ -15,6 +15,7 @@ namespace ChessRoyale
         private static readonly Color CuffGold = new Color(0.83f, 0.63f, 0.25f, 1f);
         private static Material gloveMaterial;
         private static Material cuffMaterial;
+        private static Material outlineMaterial;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void InstallSceneHands()
@@ -57,24 +58,24 @@ namespace ChessRoyale
             hand.transform.localRotation = Quaternion.identity;
             hand.transform.localScale = Vector3.one;
 
-            AddPart(hand.transform, "Palm", new Vector3(0f, -0.01f, -0.03f), new Vector3(0.078f, 0.028f, 0.09f), gloveMaterial);
-            AddPart(hand.transform, "Cuff", new Vector3(0f, -0.01f, 0.03f), new Vector3(0.086f, 0.036f, 0.035f), cuffMaterial);
+            AddPart(hand.transform, "Palm", new Vector3(0f, -0.01f, -0.03f), new Vector3(0.078f, 0.028f, 0.09f), gloveMaterial, true);
+            AddPart(hand.transform, "Cuff", new Vector3(0f, -0.01f, 0.03f), new Vector3(0.086f, 0.036f, 0.035f), cuffMaterial, false);
             float thumb = left ? 0.048f : -0.048f;
-            AddPart(hand.transform, "Thumb", new Vector3(thumb, -0.005f, -0.01f), new Vector3(0.02f, 0.02f, 0.04f), gloveMaterial);
+            AddPart(hand.transform, "Thumb", new Vector3(thumb, -0.005f, -0.01f), new Vector3(0.02f, 0.02f, 0.04f), gloveMaterial, true);
 
             // The index finger is the one next to the thumb.
             Transform[] fingers = new Transform[4];
             for (int finger = 0; finger < fingers.Length; finger++)
             {
                 float x = -0.028f + finger * 0.018f;
-                fingers[finger] = AddPart(hand.transform, $"Finger {finger + 1}", new Vector3(x, -0.004f, -0.095f), new Vector3(0.014f, 0.014f, 0.05f), gloveMaterial);
+                fingers[finger] = AddPart(hand.transform, $"Finger {finger + 1}", new Vector3(x, -0.004f, -0.095f), new Vector3(0.014f, 0.014f, 0.05f), gloveMaterial, true);
             }
 
             hand.AddComponent<ChessHandPose>().Initialize(left, fingers, left ? 3 : 0);
             return hand.transform;
         }
 
-        private static Transform AddPart(Transform parent, string name, Vector3 localPosition, Vector3 localScale, Material material)
+        private static Transform AddPart(Transform parent, string name, Vector3 localPosition, Vector3 localScale, Material material, bool outlined)
         {
             GameObject part = GameObject.CreatePrimitive(PrimitiveType.Cube);
             part.name = name;
@@ -89,12 +90,32 @@ namespace ChessRoyale
             Renderer renderer = part.GetComponent<Renderer>();
             if (renderer != null && material != null)
                 renderer.sharedMaterial = material;
+            if (outlined)
+                AddOutline(part.transform);
             return part.transform;
+        }
+
+        // Dark-gold inverted shell (only back faces draw) so the white glove stays visible over the white squares.
+        private static void AddOutline(Transform part)
+        {
+            if (outlineMaterial == null)
+                return;
+
+            GameObject outline = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            outline.name = "Outline";
+            outline.transform.SetParent(part, false);
+            outline.transform.localPosition = Vector3.zero;
+            outline.transform.localRotation = Quaternion.identity;
+            outline.transform.localScale = Vector3.one * 1.25f;
+            Collider collider = outline.GetComponent<Collider>();
+            if (collider != null)
+                Object.Destroy(collider);
+            outline.GetComponent<Renderer>().sharedMaterial = outlineMaterial;
         }
 
         private static void EnsureMaterials()
         {
-            if (gloveMaterial != null && cuffMaterial != null)
+            if (gloveMaterial != null && cuffMaterial != null && outlineMaterial != null)
                 return;
 
             Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
@@ -105,6 +126,8 @@ namespace ChessRoyale
 
             gloveMaterial = new Material(shader) { name = "Hand Glove", color = GloveWhite };
             cuffMaterial = new Material(shader) { name = "Hand Cuff", color = CuffGold };
+            outlineMaterial = new Material(shader) { name = "Hand Outline", color = new Color(0.33f, 0.22f, 0.05f, 1f) };
+            outlineMaterial.SetFloat("_Cull", 1f);
         }
     }
 
