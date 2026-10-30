@@ -84,6 +84,8 @@ namespace ChessRoyale.Networking
 
             SetWaiting(false);
             ChessPieceInteractable piece = ChessGameController.Instance?.FindPiece(pieceId);
+            if (piece != null)
+                ChessAudio.PlayAt(ChessSfx.Invalid, piece.transform.position);
             piece?.SnapBackToCurrentSquare();
         }
 
