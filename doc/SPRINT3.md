@@ -37,6 +37,7 @@ Still open: choosing 5 minutes, 10 minutes, or untimed from the start screen.
 | Team Member | Contributions |
 |---|---|
 | RuoHan Chen | Implemented multiplayer networking using Photon Fusion, including creating and joining game rooms, and worked on networking fixes and testing. |
+| Derrick Seo | Worked on background music, gameplay sound effects, and UI sound effects. |
 | Sarina Liu | Worked on multiplayer networking testing and troubleshooting and updated the GitHub project board. |
 | Feiyuan Yang | Updated Sprint 3 documentation and helped test and troubleshoot multiplayer networking. |
 

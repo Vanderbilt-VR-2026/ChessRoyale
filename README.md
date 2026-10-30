@@ -103,7 +103,7 @@ The separately licensed Asset Store source folders and generated Unity/build dir
 | Team member | Major | Role | Owns |
 |---|---|---|---|
 | RuoHan Chen | CS | GitHub Manager | Chess rules, piece placement, Photon rooms, and match sync |
-| Derrick Seo | CS | Communications Director | |
+| Derrick Seo | CS | Communications Director | Music and sound effects |
 | Sarina Liu | CS | Design Director | Hall, lighting, timer, and the Sprint 3 design notes |
 | Feiyuan Yang | CS | Asset Manager | Teleportation, the VR main menu, and sprint documentation |
 
