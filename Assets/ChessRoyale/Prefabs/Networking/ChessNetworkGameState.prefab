@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 8481925857149054498}
   - component: {fileID: 7141315677435637271}
   - component: {fileID: 967199178796325162}
+  - component: {fileID: 7179712083315778541}
   m_Layer: 0
   m_Name: ChessNetworkGameState
   m_TagString: Untagged
@@ -52,6 +53,7 @@ MonoBehaviour:
   NestedObjects: []
   NetworkedBehaviours:
   - {fileID: 967199178796325162}
+  - {fileID: 7179712083315778541}
   ForceRemoteRenderTimeframe: 0
 --- !u!114 &967199178796325162
 MonoBehaviour:
@@ -68,4 +70,31 @@ MonoBehaviour:
   _MatchReady:
     RawValue: 0
   _OpponentLeft:
+    RawValue: 0
+--- !u!114 &7179712083315778541
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5008876450160394923}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 62ee30540d2a9420fa76e56a888766c7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ChessRoyale.Networking.ChessNetworkGameState
+  _MatchReady:
+    RawValue: 0
+  _MoveSequence: 0
+  _ActiveColor: 0
+  _Outcome: 0
+  _PendingPromotionPieceId: 0
+  _EnPassantSquareIndex: 0
+  _EnPassantPawnId: 0
+  _HalfmoveClock: 0
+  _WhiteTimeMs: 0
+  _BlackTimeMs: 0
+  _WhiteRematch:
+    RawValue: 0
+  _BlackRematch:
     RawValue: 0

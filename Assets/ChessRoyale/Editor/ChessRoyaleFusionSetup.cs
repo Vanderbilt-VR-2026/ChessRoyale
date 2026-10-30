@@ -38,7 +38,7 @@ namespace ChessRoyale.Editor
             }
 
             Debug.Log(
-                "Chess Royale Photon Fusion lobby is configured. " +
+                "Chess Royale Photon Fusion chess state is configured. " +
                 "Shared Mode rooms use four-letter codes and are limited to 2 players.");
         }
 
@@ -106,6 +106,8 @@ namespace ChessRoyale.Editor
                     root.AddComponent<NetworkObject>();
                 if (root.GetComponent<ChessFusionLobbyState>() == null)
                     root.AddComponent<ChessFusionLobbyState>();
+                if (root.GetComponent<ChessNetworkGameState>() == null)
+                    root.AddComponent<ChessNetworkGameState>();
 
                 new NetworkObjectBaker().Bake(root);
                 PrefabUtility.SaveAsPrefabAsset(root, GameStatePrefabPath);

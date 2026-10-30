@@ -15,6 +15,8 @@ namespace ChessRoyale
         DrawFiftyMoveRule,
         WhiteWinsOnTime,
         BlackWinsOnTime,
+        WhiteWinsByDisconnect,
+        BlackWinsByDisconnect,
     }
 
     [DisallowMultipleComponent]
@@ -57,14 +59,21 @@ namespace ChessRoyale
         private ChessBoardSquare checkedKingSquare;
         private bool pendingMoveWasCapture;
         private int halfmoveClock;
-        private bool networkRoomOpen;
+        private bool networkSessionActive;
+        private bool networkMatchReady;
+        private bool networkHasSeat;
+        private bool networkAwaitingAuthority;
+        private ChessPieceColor networkSeatColor;
 
         public event System.Action GameReset;
+        public event System.Action<ChessPieceType> PromotionRequested;
+        public event System.Action RematchRequested;
 
         public static ChessGameController Instance { get; private set; }
         public ChessPieceColor ActiveColor => activeColor;
         public ChessGameOutcome Outcome => outcome;
         public string StatusMessage => statusMessage;
+        public int RegisteredPieceCount => pieces.Count;
         public bool IsPromotionPending => pendingPromotionPiece != null;
 
         private void Awake()
@@ -108,22 +117,64 @@ namespace ChessRoyale
                 RecordCurrentPosition();
         }
 
-        public void SetNetworkRoomOpen(bool open)
+        public void SetNetworkPlay(bool inRoom, bool matchReady, bool hasSeat, ChessPieceColor seatColor)
         {
-            if (networkRoomOpen == open)
+            bool changed = networkSessionActive != inRoom
+                || networkMatchReady != matchReady
+                || networkHasSeat != hasSeat
+                || networkSeatColor != seatColor;
+            networkSessionActive = inRoom;
+            networkMatchReady = matchReady;
+            networkHasSeat = hasSeat;
+            networkSeatColor = seatColor;
+            if (!inRoom)
+                networkAwaitingAuthority = false;
+            if (!changed && !inRoom)
+                RefreshTurnInteraction();
+            if (!changed)
                 return;
 
-            networkRoomOpen = open;
-            if (open)
+            if (inRoom && !matchReady)
+                ClearMoveHints();
+            RefreshPromotionPresentation();
+            RefreshTurnInteraction();
+        }
+
+        public void SetAwaitingAuthority(bool waiting)
+        {
+            if (networkAwaitingAuthority == waiting)
+                return;
+
+            networkAwaitingAuthority = waiting;
+            if (waiting)
                 ClearMoveHints();
             RefreshTurnInteraction();
+        }
+
+        public ChessPieceInteractable FindPiece(byte pieceId)
+        {
+            foreach (ChessPieceInteractable piece in pieces)
+            {
+                if (piece.PieceId == pieceId)
+                    return piece;
+            }
+
+            return null;
+        }
+
+        public ChessBoardSquare FindSquareByIndex(int squareIndex)
+        {
+            if (!ChessSquareIndex.TryGetFileRank(squareIndex, out int file, out int rank))
+                return null;
+
+            return GetSquare(file, rank);
         }
 
         public bool BeginMove(ChessPieceInteractable piece)
         {
             ClearMoveHints();
-            if (networkRoomOpen || outcome != ChessGameOutcome.InProgress || pendingPromotionPiece != null ||
-                piece == null || piece.IsCaptured || piece.PieceColor != activeColor || piece.CurrentSquare == null)
+            if (!CanLocalPlayerMove(piece) || outcome != ChessGameOutcome.InProgress || pendingPromotionPiece != null ||
+                piece.CurrentSquare == null)
                 return false;
 
             foreach (ChessBoardSquare destination in GetLegalMoves(piece))
@@ -187,10 +238,112 @@ namespace ChessRoyale
             RefreshTurnInteraction();
         }
 
-        public void PromoteToQueen() => CompletePromotion(ChessPieceType.Queen);
-        public void PromoteToRook() => CompletePromotion(ChessPieceType.Rook);
-        public void PromoteToBishop() => CompletePromotion(ChessPieceType.Bishop);
-        public void PromoteToKnight() => CompletePromotion(ChessPieceType.Knight);
+        public void PromoteToQueen() => SubmitPromotion(ChessPieceType.Queen);
+        public void PromoteToRook() => SubmitPromotion(ChessPieceType.Rook);
+        public void PromoteToBishop() => SubmitPromotion(ChessPieceType.Bishop);
+        public void PromoteToKnight() => SubmitPromotion(ChessPieceType.Knight);
+
+        public bool TryCompletePromotion(ChessPieceType promotedType)
+        {
+            if (pendingPromotionPiece == null || promotedType == ChessPieceType.Pawn || promotedType == ChessPieceType.King)
+                return false;
+
+            CompletePromotion(promotedType);
+            return true;
+        }
+
+        public void RequestRematch()
+        {
+            if (networkSessionActive)
+            {
+                if (!networkMatchReady || outcome == ChessGameOutcome.InProgress)
+                    return;
+
+                RematchRequested?.Invoke();
+                return;
+            }
+
+            ResetGame();
+        }
+
+        public sbyte PendingPromotionPieceId => pendingPromotionPiece == null ? (sbyte)-1 : (sbyte)pendingPromotionPiece.PieceId;
+        public sbyte EnPassantSquareIndex => ChessSquareIndex.FromSquare(enPassantTargetSquare);
+        public sbyte EnPassantPawnId => enPassantVulnerablePawn == null ? (sbyte)-1 : (sbyte)enPassantVulnerablePawn.PieceId;
+        public int HalfmoveClock => halfmoveClock;
+
+        public ChessRulesSnapshot ExportRulesSnapshot()
+        {
+            ChessPieceSnapshot[] exported = new ChessPieceSnapshot[32];
+            foreach (ChessPieceInteractable piece in pieces)
+            {
+                if (piece.PieceId >= exported.Length)
+                    continue;
+
+                exported[piece.PieceId] = new ChessPieceSnapshot
+                {
+                    PieceId = piece.PieceId,
+                    Color = piece.PieceColor,
+                    Type = piece.PieceType,
+                    SquareIndex = piece.IsCaptured ? (sbyte)-1 : ChessSquareIndex.FromSquare(piece.CurrentSquare),
+                    HasMoved = piece.HasMoved,
+                    Captured = piece.IsCaptured,
+                };
+            }
+
+            return new ChessRulesSnapshot
+            {
+                Pieces = exported,
+                ActiveColor = activeColor,
+                Outcome = outcome,
+                StatusMessage = statusMessage,
+                PendingPromotionPieceId = PendingPromotionPieceId,
+                EnPassantSquareIndex = EnPassantSquareIndex,
+                EnPassantPawnId = EnPassantPawnId,
+                HalfmoveClock = halfmoveClock,
+            };
+        }
+
+        public void ApplyRulesSnapshot(ChessRulesSnapshot snapshot, bool preserveRepetitionHistory)
+        {
+            if (snapshot.Pieces == null)
+                return;
+
+            ClearMoveHints();
+            ClearCheckSignal();
+            board.Clear();
+            if (!preserveRepetitionHistory)
+                positionCounts.Clear();
+
+            for (int index = 0; index < snapshot.Pieces.Length && index < 32; index++)
+            {
+                ChessPieceSnapshot pieceState = snapshot.Pieces[index];
+                ChessPieceInteractable piece = FindPiece(pieceState.PieceId);
+                if (piece == null)
+                    continue;
+
+                ChessBoardSquare square = pieceState.Captured ? null : FindSquareByIndex(pieceState.SquareIndex);
+                piece.ApplyAuthoritativeState(square, pieceState.Type, pieceState.HasMoved, pieceState.Captured);
+                if (!pieceState.Captured && square != null)
+                    board[square] = piece;
+            }
+
+            activeColor = snapshot.ActiveColor;
+            outcome = snapshot.Outcome;
+            statusMessage = string.IsNullOrEmpty(snapshot.StatusMessage)
+                ? DescribeOutcome(snapshot.Outcome, snapshot.ActiveColor)
+                : snapshot.StatusMessage;
+            halfmoveClock = snapshot.HalfmoveClock;
+            pendingPromotionPiece = snapshot.PendingPromotionPieceId >= 0
+                ? FindPiece((byte)snapshot.PendingPromotionPieceId)
+                : null;
+            enPassantTargetSquare = FindSquareByIndex(snapshot.EnPassantSquareIndex);
+            enPassantVulnerablePawn = snapshot.EnPassantPawnId >= 0
+                ? FindPiece((byte)snapshot.EnPassantPawnId)
+                : null;
+            PresentCheckHint();
+            RefreshPromotionPresentation();
+            RefreshTurnInteraction();
+        }
 
         public void ResetGame()
         {
@@ -234,6 +387,24 @@ namespace ChessRoyale
 
             outcome = flagged == ChessPieceColor.White ? ChessGameOutcome.BlackWinsOnTime : ChessGameOutcome.WhiteWinsOnTime;
             statusMessage = flagged == ChessPieceColor.White ? "Black wins on time" : "White wins on time";
+            Debug.Log($"Chess Royale result: {statusMessage}");
+            RefreshTurnInteraction();
+        }
+
+        public void EndByDisconnect(ChessPieceColor disconnected)
+        {
+            if (outcome != ChessGameOutcome.InProgress)
+                return;
+
+            ClearMoveHints();
+            ClearCheckSignal();
+            pendingPromotionPiece = null;
+            if (promotionPanel != null)
+                promotionPanel.SetActive(false);
+
+            bool whiteLeft = disconnected == ChessPieceColor.White;
+            outcome = whiteLeft ? ChessGameOutcome.BlackWinsByDisconnect : ChessGameOutcome.WhiteWinsByDisconnect;
+            statusMessage = whiteLeft ? "White disconnected. Black wins." : "Black disconnected. White wins.";
             Debug.Log($"Chess Royale result: {statusMessage}");
             RefreshTurnInteraction();
         }
@@ -646,10 +817,94 @@ namespace ChessRoyale
             return true;
         }
 
+        private void SubmitPromotion(ChessPieceType promotedType)
+        {
+            if (networkSessionActive)
+            {
+                PromotionRequested?.Invoke(promotedType);
+                return;
+            }
+
+            CompletePromotion(promotedType);
+        }
+
+        private static string DescribeOutcome(ChessGameOutcome result, ChessPieceColor sideToMove)
+        {
+            switch (result)
+            {
+                case ChessGameOutcome.WhiteCheckmates:
+                    return "White wins by checkmate";
+                case ChessGameOutcome.BlackCheckmates:
+                    return "Black wins by checkmate";
+                case ChessGameOutcome.Stalemate:
+                    return "Draw by stalemate";
+                case ChessGameOutcome.DrawInsufficientMaterial:
+                    return "Draw by insufficient material";
+                case ChessGameOutcome.DrawThreefoldRepetition:
+                    return "Draw by threefold repetition";
+                case ChessGameOutcome.DrawFiftyMoveRule:
+                    return "Draw by fifty-move rule";
+                case ChessGameOutcome.WhiteWinsOnTime:
+                    return "White wins on time";
+                case ChessGameOutcome.BlackWinsOnTime:
+                    return "Black wins on time";
+                case ChessGameOutcome.WhiteWinsByDisconnect:
+                    return "Black disconnected. White wins.";
+                case ChessGameOutcome.BlackWinsByDisconnect:
+                    return "White disconnected. Black wins.";
+                default:
+                    return $"{sideToMove} to move";
+            }
+        }
+
+        private bool CanLocalPlayerMove(ChessPieceInteractable piece)
+        {
+            if (piece == null || piece.IsCaptured || piece.PieceColor != activeColor)
+                return false;
+            if (!networkSessionActive)
+                return true;
+
+            return networkMatchReady && networkHasSeat && piece.PieceColor == networkSeatColor;
+        }
+
+        private void RefreshPromotionPresentation()
+        {
+            if (pendingPromotionPiece == null)
+            {
+                if (promotionPanel != null)
+                    promotionPanel.SetActive(false);
+                return;
+            }
+
+            ShowPromotionPanel();
+        }
+
+        private void PresentCheckHint()
+        {
+            ClearCheckSignal();
+            if (outcome != ChessGameOutcome.InProgress)
+                return;
+
+            ChessBoardSquare kingSquare = FindKingSquare(activeColor);
+            if (kingSquare == null || !IsSquareAttacked(kingSquare, Opposite(activeColor)))
+                return;
+
+            checkedKingSquare = kingSquare;
+            checkedKingSquare.SetCheckHint(true);
+            if (outcome == ChessGameOutcome.InProgress)
+                statusMessage = $"{activeColor} to move — check";
+        }
+
         private void ShowPromotionPanel()
         {
             if (promotionPanel == null)
                 return;
+
+            if (networkSessionActive && (!networkHasSeat || pendingPromotionPiece == null || pendingPromotionPiece.PieceColor != networkSeatColor))
+            {
+                promotionPanel.SetActive(false);
+                return;
+            }
 
             Camera camera = Camera.main;
             if (camera != null)
@@ -682,9 +937,9 @@ namespace ChessRoyale
 
         private void RefreshTurnInteraction()
         {
-            bool gameAcceptsMoves = !networkRoomOpen && outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null;
+            bool gameAcceptsMoves = outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null && !(networkSessionActive && networkAwaitingAuthority);
             foreach (ChessPieceInteractable piece in pieces)
-                piece.SetTurnEnabled(gameAcceptsMoves && !piece.IsCaptured && piece.PieceColor == activeColor);
+                piece.SetTurnEnabled(gameAcceptsMoves && CanLocalPlayerMove(piece));
         }
 
         private void RecordCurrentPosition()
