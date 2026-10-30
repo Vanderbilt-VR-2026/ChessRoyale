@@ -4,30 +4,45 @@ The [project README](README.md) describes the game as it is now. Each sprint's n
 
 ## Sprint 1
 
-Sprint 1 established the first playable Meta Quest version of Chess Royale. This preserves the milestone documentation from [PR #7](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/7) without carrying its APK into the current branch.
+Sprint 1 put a player on a Quest inside an oversized board and proved the pieces could be grabbed. The milestone notes from [PR #7](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/7) are kept here. That pull request's APK is not on this branch.
 
-### Goal
+### Scene and pieces
 
-Build the Unity and OpenXR foundation, place the player inside an oversized chess environment, and demonstrate two VR interaction methods.
+The player stands in the middle of the board. All 32 pieces are human-scale Chess Mega Set models. The scene uses the 3D Sci-Fi Kit arena and the project lighting. [SETUP.md](SETUP.md) covers the Unity version, asset import, and a Quest build.
 
-### Completed work
+Included: Unity XR, OpenXR, and Quest controller profiles. Near grab, a distance ray, square snapping, and a board reset.
 
-- Configured Unity XR, OpenXR, and Quest controller support.
-- Created a playable scene with the user positioned in the middle of an oversized chess board.
-- Added all 32 human-scale chess pieces using the Chess Mega Set models.
-- Added near grabbing, distance ray dragging, square snapping, and a board-reset control.
-- Built the original scene inside a 3D Sci-Fi Kit arena with project lighting.
-- Added [SETUP.md](SETUP.md) with Unity, asset-import, editor-testing, and Quest build instructions.
+Still open at the end of the sprint: a checkered board, legal chess, and multiplayer.
 
 ### Demo
 
 [Watch the Sprint 1 VR demo](https://github.com/Vanderbilt-VR-2026/ChessRoyale/blob/e1083a7cb03dbb5c3c5eaa15d480841bae2802ed/sprint1.mov).
 
-### What changed after Sprint 1
+### In progress
 
-Sprint 2 replaced the original arena presentation with a clean black-and-white board made from 64 independent squares. It also added stable piece placement, turn enforcement, legal moves, move hints, captures, complete chess outcomes, castling, en passant, and pawn promotion.
+The arena presentation was the placeholder court.
+
+### Next
+
+Replace the arena with a clean board and add turns, legal moves, and the rest of the rules.
 
 ## Sprint 2
+
+Sprint 2 made the board a real chess game and gave the player a hall to stand in. Pieces stay on squares, only legal moves count, and the player can walk the board.
+
+### Board and rules
+
+The player grabs a piece and drops it on a glowing square. Illegal drops go back.
+
+Included: 64 separate squares, stable placement, turns, captures, hints, check, checkmate, stalemate, castling, en passant, promotion, and the draw rules.
+
+Still open at the end of the sprint: an online opponent.
+
+### Hall, clock, and menu
+
+The player starts from a VR menu and can teleport across the board without leaving it. A chess clock is in the scene.
+
+Included: the hall, lighting, board confinement, the main menu, and teleportation limited to the board.
 
 ### Demo
 
@@ -50,9 +65,17 @@ Sprint 2 replaced the original arena presentation with a clean black-and-white b
 4. [Complete chess rules and promotion](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/25)
 5. [Sprint 2 documentation and contribution log](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/26)
 
+### In progress
+
+Online play was not in this sprint. The clock ran as a local scene clock.
+
+### Next
+
+Connect two headsets through a room code and keep one shared board.
+
 ## Sprint 3
 
-The Quest build for this sprint is [chessRoyale.apk](chessRoyale.apk).
+Sprint 3 splits local chess from online chess and gives every screen a way back to the lobby. The Quest build is [chessRoyale.apk](chessRoyale.apk).
 
 ### Design
 
@@ -66,11 +89,23 @@ Pieces still use the toolkit's default Near-Far interactor, so a hand can grab a
 
 Hands replace the controller models. Menus and the result screen use pointer hands with a ray. During the match the hands are gloves and the ray is hidden.
 
-#### Networking
+### Rooms
 
-Single Player is local. Multiplayer is online through Photon. Two players join a room and share one hall, the moves, and the chess clock.
+From Multiplayer the player chooses Join or Create. Create shows a four-letter code. Join types that code on the panel keyboard. A code that is not found stays on the join screen.
 
-### Team Contributions
+Included: four-letter codes, the in-panel A–Z keyboard, and Lobby from the wait, the match, and the join screen.
+
+Still open: a time-control choice before the clock starts.
+
+### Clock and the end of the match
+
+The clock is hidden until both players are seated. When the game ends the panel says You Win, You Lose, or Draw. Rematch starts only after both agree. Return to Lobby goes back to Join or Create.
+
+Included: a shared clock, win and loss on time, and a disconnect forfeit after the match has started.
+
+Still open: choosing 5 minutes, 10 minutes, or untimed from the start screen.
+
+### Team contributions
 
 | Team Member | Contributions |
 |---|---|
@@ -78,3 +113,11 @@ Single Player is local. Multiplayer is online through Photon. Two players join a
 | Derrick Seo | Worked on background music, gameplay and UI sound effects, and product-sense documentation. |
 | Sarina Liu | Worked on multiplayer networking testing and troubleshooting and updated the GitHub project board. |
 | Feiyuan Yang | Updated Sprint 3 documentation and helped test and troubleshoot multiplayer networking. |
+
+### In progress
+
+Direct grab for pieces, with the ray kept for menus. Hands that switch between a pointer and a glove as the screen changes. A time-control choice on the start screen.
+
+### Next
+
+Limit the ray to menus, add the time presets, and keep the shared match in step when a player drops briefly and comes back.

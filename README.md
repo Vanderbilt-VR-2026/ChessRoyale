@@ -1,8 +1,33 @@
 # Chess Royale
 
-Chess Royale is a Meta Quest VR chess prototype built with Unity and OpenXR. The current scene places the player in the middle of a large black-and-white board with human-sized chess pieces that can be grabbed nearby or dragged from a distance.
+Chess Royale is a Meta Quest chess game. Two people share one hall and one giant board, or one person plays both sides.
+
+It is built in Unity **6000.3.23f1** with OpenXR, the XR Interaction Toolkit, and Photon Fusion, for Meta Quest 3.
 
 Sprint writeups live in [SPRINTS.md](SPRINTS.md): [Sprint 1](SPRINTS.md#sprint-1), [Sprint 2](SPRINTS.md#sprint-2), and [Sprint 3](SPRINTS.md#sprint-3).
+
+## Getting started
+
+### In the editor
+
+Open `Assets/ChessRoyale/Scenes/MainMenu.unity`. That scene is first in the build. It has **Single Player** and **Multiplayer**. Asset import and **Build and Run** are in [SETUP.md](SETUP.md).
+
+### On a Quest
+
+The Sprint 3 branch includes [chessRoyale.apk](chessRoyale.apk). Uninstall any older Chess Royale from the headset, copy the APK onto the headset, and install it there.
+
+## How a match goes
+
+**Single player.** Main menu, Single Player. The player moves White, then Black. There is no clock. Leave returns to the main menu. Photon does not start.
+
+**Multiplayer.** Main menu, Multiplayer, then Join or Create. Leave on that screen returns to the main menu. Create shows a four-letter code, and Lobby returns to Join or Create, including while the room is still connecting. Join uses an A–Z keyboard on the panel. A missing room stays on the join screen. The clock appears when both players are in. Lobby on the clock leaves the match. At the end the panel says You Win, You Lose, or Draw, then Rematch or Return to Lobby. Rematch starts only after both players agree.
+
+## What is true today
+
+- A nearby grip and a far ray can both move a piece.
+- The clock stays hidden until both players are in the room.
+- Rematch waits until both players agree.
+- Single player does not open a Photon session.
 
 ## The game
 
@@ -73,14 +98,14 @@ Quick start:
 
 The separately licensed Asset Store source folders and generated Unity/build directories are intentionally excluded from Git.
 
-## Team roles
+## Team
 
-| Team member | Major | Role |
-|---|---|---|
-| RuoHan Chen | CS | GitHub Manager |
-| Derrick Seo | CS | Communications Director |
-| Sarina Liu | CS | Design Director |
-| Feiyuan Yang | CS | Asset Manager |
+| Team member | Major | Role | Owns |
+|---|---|---|---|
+| RuoHan Chen | CS | GitHub Manager | Chess rules, piece placement, Photon rooms, and match sync |
+| Derrick Seo | CS | Communications Director | Music, sound effects, and the product-sense notes |
+| Sarina Liu | CS | Design Director | Hall, lighting, timer, and the Sprint 3 design notes |
+| Feiyuan Yang | CS | Asset Manager | Teleportation, the VR main menu, and sprint documentation |
 
 ## Product sense: deliberate design vs. AI default
 
