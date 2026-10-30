@@ -18,6 +18,8 @@ namespace ChessRoyale.Networking
             && ChessFusionRoomManager.Instance.IsConnected
             && ChessNetworkGameState.Instance != null;
 
+        public bool IsWaiting => requestInFlight;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -63,11 +65,11 @@ namespace ChessRoyale.Networking
                 return;
             }
 
-            piece.SetDropHold(true);
+            piece.PresentPredictedDrop(destination);
             pendingRequestId = nextRequestId++;
             if (nextRequestId == 0)
                 nextRequestId = 1;
-            requestInFlight = true;
+            SetWaiting(true);
             ChessNetworkGameState.Instance.RequestMove(
                 pendingRequestId,
                 piece.PieceId,
@@ -80,14 +82,16 @@ namespace ChessRoyale.Networking
             if (!requestInFlight || requestId != pendingRequestId)
                 return;
 
-            requestInFlight = false;
+            SetWaiting(false);
             ChessPieceInteractable piece = ChessGameController.Instance?.FindPiece(pieceId);
+            if (piece != null)
+                ChessAudio.PlayAt(ChessSfx.Invalid, piece.transform.position);
             piece?.SnapBackToCurrentSquare();
         }
 
         public void OnAuthoritativeMoveApplied()
         {
-            requestInFlight = false;
+            SetWaiting(false);
         }
 
         private void SubmitPromotion(ChessPieceType type)
@@ -99,16 +103,24 @@ namespace ChessRoyale.Networking
             pendingRequestId = nextRequestId++;
             if (nextRequestId == 0)
                 nextRequestId = 1;
-            requestInFlight = true;
+            SetWaiting(true);
             ChessNetworkGameState.Instance.RequestPromotion(pendingRequestId, (byte)game.PendingPromotionPieceId, (byte)type);
         }
 
         private void SubmitRematch()
         {
-            if (!IsOnline || requestInFlight)
+            ChessGameController game = ChessGameController.Instance;
+            if (!IsOnline || game == null || game.Outcome == ChessGameOutcome.InProgress)
                 return;
 
+            SetWaiting(false);
             ChessNetworkGameState.Instance.RequestReset();
+        }
+
+        private void SetWaiting(bool waiting)
+        {
+            requestInFlight = waiting;
+            ChessGameController.Instance?.SetAwaitingAuthority(waiting);
         }
 
         private void Unsubscribe()

@@ -1,5 +1,8 @@
+using ChessRoyale.Networking;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using UnityEngine.XR.Interaction.Toolkit.UI;
 
 namespace ChessRoyale
 {
@@ -28,6 +31,7 @@ namespace ChessRoyale
         private string shownStatus;
 
         private Transform panel;
+        private Transform singlePlayerLeave;
         private Transform head;
         private bool placed;
         private Image whiteFrame;
@@ -35,9 +39,24 @@ namespace ChessRoyale
         private Text whiteText;
         private Text blackText;
         private Text statusText;
+        private GameObject waitingRoot;
+        private Text waitingCodeText;
+        private GameObject matchLeaveRoot;
+        private bool waitingShown;
+
+        public static ChessClock Instance { get; private set; }
+
+        public int StartingTimeMs => Mathf.Max(1, Mathf.RoundToInt(minutesPerSide * 60f * 1000f));
 
         private void Awake()
         {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(this);
+                return;
+            }
+
+            Instance = this;
             ResetClock();
             BuildPanel();
         }
@@ -51,8 +70,16 @@ namespace ChessRoyale
 
         private void OnDestroy()
         {
+            if (Instance == this)
+                Instance = null;
             if (game != null)
                 game.GameReset -= ResetClock;
+        }
+
+        public void ApplyNetworkTime(int whiteMs, int blackMs)
+        {
+            whiteSeconds = Mathf.Max(0, whiteMs) / 1000f;
+            blackSeconds = Mathf.Max(0, blackMs) / 1000f;
         }
 
         public void ResetClock()
@@ -63,10 +90,60 @@ namespace ChessRoyale
 
         private void Update()
         {
+            if (!MainMenu.LaunchMultiplayer)
+            {
+                if (panel != null && panel.gameObject.activeSelf)
+                    panel.gameObject.SetActive(false);
+                if (singlePlayerLeave != null && !singlePlayerLeave.gameObject.activeSelf)
+                    singlePlayerLeave.gameObject.SetActive(true);
+                return;
+            }
+
+            if (singlePlayerLeave != null && singlePlayerLeave.gameObject.activeSelf)
+                singlePlayerLeave.gameObject.SetActive(false);
+
+            bool showClock = ShouldShowClock();
+            if (panel != null && panel.gameObject.activeSelf != showClock)
+                panel.gameObject.SetActive(showClock);
+            if (!showClock)
+                return;
+
+            if (WaitingForOpponent)
+            {
+                ShowWaiting(true);
+                if (waitingCodeText != null)
+                {
+                    string code = ChessFusionRoomManager.Instance != null
+                        ? ChessFusionRoomManager.Instance.CurrentRoomCode
+                        : null;
+                    if (string.IsNullOrEmpty(code))
+                    {
+                        ChessFusionLobbyUI lobby = FindAnyObjectByType<ChessFusionLobbyUI>();
+                        if (lobby != null)
+                            code = lobby.PendingRoomCode;
+                    }
+
+                    waitingCodeText.text = string.IsNullOrEmpty(code) ? "----" : code;
+                }
+
+                return;
+            }
+
+            ShowWaiting(false);
             if (game == null)
                 return;
 
-            if (game.Outcome == ChessGameOutcome.InProgress)
+            if (InNetworkRoom)
+            {
+                if (!NetworkMatchStarted)
+                    ApplyNetworkTime(StartingTimeMs, StartingTimeMs);
+                else
+                    ApplyAuthoritativeClock();
+                UpdateDisplay();
+                return;
+            }
+
+            if (MainMenu.LaunchMultiplayer && game.Outcome == ChessGameOutcome.InProgress)
             {
                 if (game.ActiveColor == ChessPieceColor.White)
                 {
@@ -91,9 +168,77 @@ namespace ChessRoyale
             UpdateDisplay();
         }
 
+        private static bool InNetworkRoom =>
+            ChessFusionRoomManager.Instance != null && ChessFusionRoomManager.Instance.IsConnected;
+
+        private static bool NetworkMatchStarted =>
+            ChessFusionLobbyState.Instance != null && ChessFusionLobbyState.Instance.MatchReady;
+
+        private static bool WaitingForOpponent =>
+            MainMenu.LaunchMultiplayer && !NetworkMatchStarted && (InNetworkRoom || HostingRoom);
+
+        private static bool HostingRoom
+        {
+            get
+            {
+                ChessFusionLobbyUI lobby = FindAnyObjectByType<ChessFusionLobbyUI>();
+                return lobby != null && lobby.IsWaitingForOpponent;
+            }
+        }
+
+        private static bool ShouldShowClock()
+        {
+            return MainMenu.LaunchMultiplayer && (InNetworkRoom || HostingRoom);
+        }
+
+        private void LeaveSinglePlayer()
+        {
+            SceneManager.LoadScene("MainMenu");
+        }
+
+        private void ShowWaiting(bool waiting)
+        {
+            if (waitingShown == waiting)
+                return;
+
+            waitingShown = waiting;
+            if (waitingRoot != null)
+                waitingRoot.SetActive(waiting);
+            if (whiteFrame != null)
+                whiteFrame.gameObject.SetActive(!waiting);
+            if (blackFrame != null)
+                blackFrame.gameObject.SetActive(!waiting);
+            if (statusText != null)
+                statusText.gameObject.SetActive(!waiting);
+            if (matchLeaveRoot != null)
+                matchLeaveRoot.SetActive(!waiting);
+        }
+
+        private void LeaveCreatedRoom()
+        {
+            ChessFusionLobbyUI lobby = FindAnyObjectByType<ChessFusionLobbyUI>();
+            if (lobby != null)
+                lobby.LeaveMatchToChoose();
+        }
+
+        private void ApplyAuthoritativeClock()
+        {
+            ChessNetworkGameState state = ChessNetworkGameState.Instance;
+            int whiteMs = state != null ? state.WhiteTimeMs : 0;
+            int blackMs = state != null ? state.BlackTimeMs : 0;
+            if (whiteMs <= 0 && blackMs <= 0)
+            {
+                whiteMs = StartingTimeMs;
+                blackMs = StartingTimeMs;
+            }
+
+            ApplyNetworkTime(whiteMs, blackMs);
+        }
+
         private void LateUpdate()
         {
-            if (panel == null)
+            Transform follow = !MainMenu.LaunchMultiplayer ? singlePlayerLeave : panel;
+            if (follow == null || !follow.gameObject.activeSelf)
                 return;
 
             if (head == null)
@@ -110,12 +255,12 @@ namespace ChessRoyale
 
             Vector3 target = head.position + forward * viewDistance + Vector3.up * viewHeightOffset;
             float blend = placed ? 1f - Mathf.Exp(-Time.deltaTime * 4f) : 1f;
-            panel.position = Vector3.Lerp(panel.position, target, blend);
+            follow.position = Vector3.Lerp(follow.position, target, blend);
             placed = true;
 
-            Vector3 away = panel.position - head.position;
+            Vector3 away = follow.position - head.position;
             if (away.sqrMagnitude > 0.0001f)
-                panel.rotation = Quaternion.LookRotation(away, Vector3.up);
+                follow.rotation = Quaternion.LookRotation(away, Vector3.up);
         }
 
         private void UpdateDisplay()
@@ -136,7 +281,7 @@ namespace ChessRoyale
                 blackText.color = blackSeconds <= lowTimeSeconds ? LowTime : Color.white;
             }
 
-            bool running = game.Outcome == ChessGameOutcome.InProgress;
+            bool running = game.Outcome == ChessGameOutcome.InProgress && (!InNetworkRoom || NetworkMatchStarted);
             whiteFrame.color = running && game.ActiveColor == ChessPieceColor.White ? ActiveFrame : IdleFrame;
             blackFrame.color = running && game.ActiveColor == ChessPieceColor.Black ? ActiveFrame : IdleFrame;
 
@@ -159,9 +304,10 @@ namespace ChessRoyale
             Canvas canvas = canvasObject.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.sortingOrder = 10;
+            canvasObject.AddComponent<TrackedDeviceGraphicRaycaster>();
 
             RectTransform rect = canvasObject.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(640f, 260f);
+            rect.sizeDelta = new Vector2(640f, 340f);
             rect.localScale = Vector3.one * 0.0014f;
             panel = canvasObject.transform;
 
@@ -171,7 +317,79 @@ namespace ChessRoyale
 
             whiteFrame = CreateBox(rect, "White Timer", new Vector2(-155f, 35f), out whiteText, "WHITE");
             blackFrame = CreateBox(rect, "Black Timer", new Vector2(155f, 35f), out blackText, "BLACK");
-            statusText = CreateText(rect, "Status", new Vector2(0f, -90f), new Vector2(600f, 50f), 30, FontStyle.Normal);
+            statusText = CreateText(rect, "Status", new Vector2(0f, -70f), new Vector2(600f, 50f), 30, FontStyle.Normal);
+            matchLeaveRoot = CreateLobbyButton(rect, new Vector2(0f, -130f));
+            BuildWaitingRoom(rect);
+            BuildSinglePlayerLeave();
+            canvasObject.SetActive(false);
+        }
+
+        private void BuildSinglePlayerLeave()
+        {
+            GameObject canvasObject = new GameObject("Single Player Leave", typeof(RectTransform));
+            canvasObject.transform.SetParent(transform, false);
+            Canvas canvas = canvasObject.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.sortingOrder = 10;
+            canvasObject.AddComponent<TrackedDeviceGraphicRaycaster>();
+
+            RectTransform rect = canvasObject.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(280f, 90f);
+            rect.localScale = Vector3.one * 0.0014f;
+            singlePlayerLeave = canvasObject.transform;
+
+            Image background = canvasObject.AddComponent<Image>();
+            background.color = new Color(0.1f, 0.28f, 0.55f, 1f);
+            Button button = canvasObject.AddComponent<Button>();
+            button.targetGraphic = background;
+            button.onClick.AddListener(LeaveSinglePlayer);
+            Text label = CreateText(rect, "Leave Label", Vector2.zero, new Vector2(280f, 90f), 32, FontStyle.Bold);
+            label.text = "LEAVE";
+            canvasObject.SetActive(!MainMenu.LaunchMultiplayer);
+        }
+
+        private void BuildWaitingRoom(RectTransform parent)
+        {
+            waitingRoot = new GameObject("Waiting Room", typeof(RectTransform));
+            waitingRoot.transform.SetParent(parent, false);
+            RectTransform root = waitingRoot.GetComponent<RectTransform>();
+            root.anchorMin = Vector2.zero;
+            root.anchorMax = Vector2.one;
+            root.offsetMin = Vector2.zero;
+            root.offsetMax = Vector2.zero;
+
+            CreateText(root, "Room", new Vector2(0f, 78f), new Vector2(600f, 36f), 24, FontStyle.Bold).text = "ROOM";
+            waitingCodeText = CreateText(root, "Code", new Vector2(0f, 18f), new Vector2(600f, 80f), 64, FontStyle.Bold);
+            waitingCodeText.text = "----";
+
+            GameObject buttonObject = new GameObject("Leave", typeof(RectTransform));
+            buttonObject.transform.SetParent(waitingRoot.transform, false);
+            RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
+            buttonRect.sizeDelta = new Vector2(280f, 64f);
+            buttonRect.anchoredPosition = new Vector2(0f, -78f);
+            Image image = buttonObject.AddComponent<Image>();
+            image.color = new Color(0.1f, 0.28f, 0.55f, 1f);
+            Button button = buttonObject.AddComponent<Button>();
+            button.onClick.AddListener(LeaveCreatedRoom);
+            Text label = CreateText(buttonRect, "Leave Label", Vector2.zero, new Vector2(280f, 64f), 28, FontStyle.Bold);
+            label.text = "LOBBY";
+            waitingRoot.SetActive(false);
+        }
+
+        private GameObject CreateLobbyButton(RectTransform parent, Vector2 position)
+        {
+            GameObject buttonObject = new GameObject("Lobby", typeof(RectTransform));
+            buttonObject.transform.SetParent(parent, false);
+            RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
+            buttonRect.sizeDelta = new Vector2(280f, 64f);
+            buttonRect.anchoredPosition = position;
+            Image image = buttonObject.AddComponent<Image>();
+            image.color = new Color(0.1f, 0.28f, 0.55f, 1f);
+            Button button = buttonObject.AddComponent<Button>();
+            button.onClick.AddListener(LeaveCreatedRoom);
+            Text label = CreateText(buttonRect, "Leave Label", Vector2.zero, new Vector2(280f, 64f), 28, FontStyle.Bold);
+            label.text = "LOBBY";
+            return buttonObject;
         }
 
         private static Image CreateBox(RectTransform parent, string name, Vector2 position, out Text timeText, string caption)

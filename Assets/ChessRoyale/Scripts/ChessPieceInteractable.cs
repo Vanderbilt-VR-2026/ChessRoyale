@@ -48,6 +48,9 @@ namespace ChessRoyale
         private bool captured;
         private bool holdDropPresentation;
         private bool boardSettlementPending;
+        private bool smoothing;
+        private ChessBoardSquare predictedSquare;
+        private Vector3 smoothTarget;
         private Bounds boardBounds;
         private bool hasBoardBounds;
 
@@ -120,7 +123,28 @@ namespace ChessRoyale
                 return;
             }
 
-            if (captured || holdDropPresentation || currentSquare == null || grabInteractable == null || grabInteractable.isSelected)
+            if (captured || grabInteractable == null || grabInteractable.isSelected)
+                return;
+
+            if (holdDropPresentation)
+            {
+                if (predictedSquare != null)
+                    MoveVisual(GetRestingPosition(predictedSquare), 18f);
+                return;
+            }
+
+            if (smoothing)
+            {
+                MoveVisual(smoothTarget, 10f);
+                if (Vector3.Distance(body.position, smoothTarget) <= 0.01f)
+                {
+                    body.position = smoothTarget;
+                    smoothing = false;
+                }
+                return;
+            }
+
+            if (currentSquare == null)
                 return;
 
             Vector3 restingPosition = GetRestingPosition(currentSquare);
@@ -154,6 +178,8 @@ namespace ChessRoyale
             ChessNetworkMoveCoordinator coordinator = ChessNetworkMoveCoordinator.Instance;
             if (coordinator != null && coordinator.IsOnline)
             {
+                if (!moveAllowed || destination == null)
+                    PlayRejectedSound(destination);
                 coordinator.SubmitReleasedMove(this, grabOriginSquare, destination, moveAllowed);
                 return;
             }
@@ -161,6 +187,7 @@ namespace ChessRoyale
             ChessGameController game = ChessGameController.Instance;
             if (!moveAllowed || destination == null)
             {
+                PlayRejectedSound(destination);
                 game?.CancelMove();
                 SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
                 return;
@@ -170,6 +197,7 @@ namespace ChessRoyale
             {
                 if (!game.TryMove(this, destination))
                 {
+                    PlayRejectedSound(destination);
                     SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
                     return;
                 }
@@ -186,6 +214,15 @@ namespace ChessRoyale
             hasMoved |= destination != currentSquare;
             SnapToSquare(destination);
             game?.FinishMovePresentation();
+        }
+
+        // Putting a piece back on the square it came from is not a mistake, so it stays silent.
+        private void PlayRejectedSound(ChessBoardSquare destination)
+        {
+            if (destination != null && destination == grabOriginSquare)
+                return;
+
+            ChessAudio.PlayAt(ChessSfx.Invalid, transform.position);
         }
 
         // A held piece follows the hand, but never leaves the board footprint or sinks below board level;
@@ -213,6 +250,9 @@ namespace ChessRoyale
             hasMoved = false;
             captured = false;
             boardSettlementPending = false;
+            smoothing = false;
+            predictedSquare = null;
+            holdDropPresentation = false;
             RestoreStartingAppearance();
             if (startingSquare != null)
                 SnapToSquare(startingSquare);
@@ -226,18 +266,39 @@ namespace ChessRoyale
         public void SetDropHold(bool hold)
         {
             holdDropPresentation = hold;
+            if (!hold)
+                predictedSquare = null;
+        }
+
+        public void PresentPredictedDrop(ChessBoardSquare destination)
+        {
+            predictedSquare = destination;
+            holdDropPresentation = true;
+            smoothing = false;
+            boardSettlementPending = false;
+            if (destination == null)
+                return;
+
+            StopMotion();
+            body.position = GetRestingPosition(destination);
+            body.rotation = startingRotation;
         }
 
         public void SnapBackToCurrentSquare()
         {
             holdDropPresentation = false;
+            predictedSquare = null;
+            smoothing = false;
             boardSettlementPending = true;
             SnapToSquare(currentSquare ?? grabOriginSquare ?? startingSquare);
         }
 
         public void ApplyAuthoritativeState(ChessBoardSquare square, ChessPieceType type, bool moved, bool isCaptured)
         {
+            bool localPrediction = holdDropPresentation;
             holdDropPresentation = false;
+            predictedSquare = null;
+            smoothing = false;
             boardSettlementPending = true;
             if (isCaptured)
             {
@@ -269,8 +330,37 @@ namespace ChessRoyale
             }
 
             hasMoved = moved;
-            if (square != null)
+            if (square == null)
+                return;
+            if (localPrediction)
                 SnapToSquare(square);
+            else
+                BeginSmoothTo(square);
+        }
+
+        private void BeginSmoothTo(ChessBoardSquare square)
+        {
+            Vector3 target = GetRestingPosition(square);
+            if (Vector3.Distance(body.position, target) <= 0.02f)
+            {
+                SnapToSquare(square);
+                return;
+            }
+
+            currentSquare = square;
+            smoothTarget = target;
+            smoothing = true;
+            boardSettlementPending = false;
+            StopMotion();
+            body.rotation = startingRotation;
+        }
+
+        private void MoveVisual(Vector3 target, float sharpness)
+        {
+            StopMotion();
+            float blend = 1f - Mathf.Exp(-Time.deltaTime * sharpness);
+            body.position = Vector3.Lerp(body.position, target, blend);
+            body.rotation = startingRotation;
         }
 
         public void SetTurnEnabled(bool enabled)

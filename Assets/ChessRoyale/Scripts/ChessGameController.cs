@@ -15,6 +15,8 @@ namespace ChessRoyale
         DrawFiftyMoveRule,
         WhiteWinsOnTime,
         BlackWinsOnTime,
+        WhiteWinsByDisconnect,
+        BlackWinsByDisconnect,
     }
 
     [DisallowMultipleComponent]
@@ -60,6 +62,7 @@ namespace ChessRoyale
         private bool networkSessionActive;
         private bool networkMatchReady;
         private bool networkHasSeat;
+        private bool networkAwaitingAuthority;
         private ChessPieceColor networkSeatColor;
 
         public event System.Action GameReset;
@@ -124,12 +127,27 @@ namespace ChessRoyale
             networkMatchReady = matchReady;
             networkHasSeat = hasSeat;
             networkSeatColor = seatColor;
+            if (!inRoom)
+                networkAwaitingAuthority = false;
+            if (!changed && !inRoom)
+                RefreshTurnInteraction();
             if (!changed)
                 return;
 
             if (inRoom && !matchReady)
                 ClearMoveHints();
             RefreshPromotionPresentation();
+            RefreshTurnInteraction();
+        }
+
+        public void SetAwaitingAuthority(bool waiting)
+        {
+            if (networkAwaitingAuthority == waiting)
+                return;
+
+            networkAwaitingAuthority = waiting;
+            if (waiting)
+                ClearMoveHints();
             RefreshTurnInteraction();
         }
 
@@ -238,6 +256,9 @@ namespace ChessRoyale
         {
             if (networkSessionActive)
             {
+                if (!networkMatchReady || outcome == ChessGameOutcome.InProgress)
+                    return;
+
                 RematchRequested?.Invoke();
                 return;
             }
@@ -366,6 +387,24 @@ namespace ChessRoyale
 
             outcome = flagged == ChessPieceColor.White ? ChessGameOutcome.BlackWinsOnTime : ChessGameOutcome.WhiteWinsOnTime;
             statusMessage = flagged == ChessPieceColor.White ? "Black wins on time" : "White wins on time";
+            Debug.Log($"Chess Royale result: {statusMessage}");
+            RefreshTurnInteraction();
+        }
+
+        public void EndByDisconnect(ChessPieceColor disconnected)
+        {
+            if (outcome != ChessGameOutcome.InProgress)
+                return;
+
+            ClearMoveHints();
+            ClearCheckSignal();
+            pendingPromotionPiece = null;
+            if (promotionPanel != null)
+                promotionPanel.SetActive(false);
+
+            bool whiteLeft = disconnected == ChessPieceColor.White;
+            outcome = whiteLeft ? ChessGameOutcome.BlackWinsByDisconnect : ChessGameOutcome.WhiteWinsByDisconnect;
+            statusMessage = whiteLeft ? "White disconnected. Black wins." : "Black disconnected. White wins.";
             Debug.Log($"Chess Royale result: {statusMessage}");
             RefreshTurnInteraction();
         }
@@ -809,6 +848,10 @@ namespace ChessRoyale
                     return "White wins on time";
                 case ChessGameOutcome.BlackWinsOnTime:
                     return "Black wins on time";
+                case ChessGameOutcome.WhiteWinsByDisconnect:
+                    return "Black disconnected. White wins.";
+                case ChessGameOutcome.BlackWinsByDisconnect:
+                    return "White disconnected. Black wins.";
                 default:
                     return $"{sideToMove} to move";
             }
@@ -894,7 +937,7 @@ namespace ChessRoyale
 
         private void RefreshTurnInteraction()
         {
-            bool gameAcceptsMoves = outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null;
+            bool gameAcceptsMoves = outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null && !(networkSessionActive && networkAwaitingAuthority);
             foreach (ChessPieceInteractable piece in pieces)
                 piece.SetTurnEnabled(gameAcceptsMoves && CanLocalPlayerMove(piece));
         }

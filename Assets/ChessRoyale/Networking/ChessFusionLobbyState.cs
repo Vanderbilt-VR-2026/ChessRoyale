@@ -53,27 +53,49 @@ namespace ChessRoyale.Networking
             if (Object == null || !Object.IsValid || !Object.HasStateAuthority || Runner == null)
                 return;
 
-            PlayerRef white = Runner.LocalPlayer;
-            PlayerRef black = PlayerRef.None;
+            PlayerRef white = IsActive(WhitePlayer) ? WhitePlayer : PlayerRef.None;
+            PlayerRef black = IsActive(BlackPlayer) ? BlackPlayer : PlayerRef.None;
             foreach (PlayerRef player in Runner.ActivePlayers)
             {
-                if (player != white)
+                if (player == white || player == black)
+                    continue;
+                if (white == PlayerRef.None)
+                    white = player;
+                else if (black == PlayerRef.None)
                     black = player;
             }
 
-            bool ready = black != PlayerRef.None;
+            bool ready = white != PlayerRef.None && black != PlayerRef.None;
             bool becameReady = ready && !MatchReady;
             if (MatchReady && !ready)
                 OpponentLeft = true;
             if (ready)
                 OpponentLeft = false;
 
+            PlayerRef previousWhite = WhitePlayer;
+            PlayerRef previousBlack = BlackPlayer;
             WhitePlayer = white;
             BlackPlayer = black;
             MatchReady = ready;
-            ChessNetworkGameState.Instance?.SetSeats(white, black, ready);
-            if (becameReady)
-                ChessNetworkGameState.Instance?.PublishInitialBoard();
+            ChessNetworkGameState state = ChessNetworkGameState.Instance;
+            state?.SetSeats(white, black, ready);
+            state?.ClearRematchForChangedSeat(previousWhite, white, previousBlack, black);
+            if (becameReady && state != null && state.MoveSequence == 0)
+                state.PublishInitialBoard();
+        }
+
+        private bool IsActive(PlayerRef player)
+        {
+            if (player == PlayerRef.None || Runner == null)
+                return false;
+
+            foreach (PlayerRef active in Runner.ActivePlayers)
+            {
+                if (active == player)
+                    return true;
+            }
+
+            return false;
         }
 
         public static string SeatLabel(ChessSeat seat)
