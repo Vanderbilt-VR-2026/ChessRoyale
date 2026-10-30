@@ -31,6 +31,12 @@ namespace ChessRoyale
 
         public void ResetAllPieces()
         {
+            if (ChessGameController.Instance != null)
+            {
+                ChessGameController.Instance.ResetGame();
+                return;
+            }
+
             foreach (ChessPieceInteractable piece in FindObjectsByType<ChessPieceInteractable>(FindObjectsSortMode.None))
                 piece.ResetToStart();
         }
