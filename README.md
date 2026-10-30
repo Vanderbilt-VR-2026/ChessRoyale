@@ -4,7 +4,7 @@ Chess Royale is a Meta Quest chess game. Two people share one hall and one giant
 
 It is built in Unity **6000.3.23f1** with OpenXR, the XR Interaction Toolkit, and Photon Fusion, for Meta Quest 3.
 
-Sprint writeups live in [doc/SPRINTS.md](doc/SPRINTS.md): [Sprint 1](doc/SPRINTS.md#sprint-1), [Sprint 2](doc/SPRINTS.md#sprint-2), and [Sprint 3](doc/SPRINTS.md#sprint-3).
+Sprint writeups live in [doc/SPRINTS.md](doc/SPRINTS.md): [Sprint 1](doc/SPRINT1.md), [Sprint 2](doc/SPRINT2.md), and [Sprint 3](doc/SPRINT3.md).
 
 ## Getting started
 
@@ -103,13 +103,13 @@ The separately licensed Asset Store source folders and generated Unity/build dir
 | Team member | Major | Role | Owns |
 |---|---|---|---|
 | RuoHan Chen | CS | GitHub Manager | Chess rules, piece placement, Photon rooms, and match sync |
-| Derrick Seo | CS | Communications Director | Music, sound effects, and the product-sense notes |
+| Derrick Seo | CS | Communications Director | |
 | Sarina Liu | CS | Design Director | Hall, lighting, timer, and the Sprint 3 design notes |
 | Feiyuan Yang | CS | Asset Manager | Teleportation, the VR main menu, and sprint documentation |
 
-## Product sense: deliberate design vs. AI default
+## Product sense
 
-AI tools tend to produce the "complete, generic" version of a feature: every rule implemented, every state shown as text, every flow covered. This section separates the features that exist because they make Chess Royale a better VR game from the ones that are there mainly because that is what an AI-assisted build produces by default, and says what to do about each.
+These features are in the game because they make Chess Royale a better fit for VR.
 
 ### Features that make sense for this game
 
@@ -124,25 +124,6 @@ AI tools tend to produce the "complete, generic" version of a feature: every rul
 | Rematch only when both players agree | Prevents one player from resetting the board on the other. |
 | Spatial sound for piece grabs and illegal moves (new) | On a board this big, sound coming from the piece helps the player notice what happened and where, without reading text. |
 
-### Features that look like AI defaults
-
-| Feature | Why it reads as a default | Recommendation |
-|---|---|---|
-| Every draw rule (threefold repetition, fifty-move rule, insufficient material) | Rule-complete chess is what an AI produces when asked for "chess." Casual VR sessions almost never reach these. | Keep, since the code already works, but don't spend black-box testing time on them before core moves, captures, and networking are solid. |
-| Game state shown as status text ("White to move — check") | Text is the generic way to show state. In VR, text on a panel is easy to miss when you're looking at pieces. | Keep the text, but lead with in-world signals: the red king glow, the check sound, and the turn indicator below. |
-| Disconnect immediately counts as a win for the other player | This is the simplest rule to implement. On Quest, short Wi-Fi drops and headset sleep are common, so a real player can lose a good game by accident. | Give a short reconnect window (for example, 30 seconds) before awarding the win. |
-| Fixed 10-minute clock for online games | One hard-coded value is the default. The [Sprint 3 writeup](doc/SPRINTS.md#sprint-3) calls for a time-control choice on the start screen. | Add two or three presets (for example, 5, 10, and untimed). |
-| Many navigation buttons (Leave, Lobby, Return to Lobby) on several screens | Covering every path is thorough, but each screen ends up with similar-looking options. | Black-box test the menus with someone new to the game and remove any button they don't need. |
-
-### Suggested features for Sprint 3
-
-These come from what would make the game more fun to play, not from what is easy to generate:
-
-1. **Turn indicator in the world** (Feiyuan's idea): light up the active player's side of the board, or the edge of the board facing them. This matters more than a text label because players are looking at pieces, not panels.
-2. **A raised overview spot**: a teleport point above the board, so players can see the whole position. From ground level, the far side of a giant board is hard to read.
-3. **A capture moment**: a short visual effect with the capture sound, so captures feel like the "royale" in the name.
-4. **A hint toggle**: experienced players may want to turn the move glow off.
-
 ## AI usage
 
 OpenAI ChatGPT and Codex were used under human direction to help:
@@ -155,5 +136,3 @@ OpenAI ChatGPT and Codex were used under human direction to help:
 AI-generated suggestions are reviewed through the pull-request workflow and should be black-box tested in Unity and on Meta Quest before merge. AI is used as a development aid; it is not an in-game feature and does not make chess moves for the player.
 
 Claude was also used as a step-by-step guide for configuring the XR Interaction Toolkit (world-space menu UI, controller ray interaction, teleportation areas and layers), explaining Git branching and merge-conflict resolution, troubleshooting Quest USB debugging, and drafting PR and README text. Start and end screen layouts were designed by the team, and AI helped write their code. All changes were configured, tested on Meta Quest 3, and debugged by the team.
-
-Claude was used to help write the `ChessAudio` sound system and to draft the product-sense section above; the audio was chosen, placed, and tested by the team, and the product-sense recommendations were reviewed and edited by the team.
