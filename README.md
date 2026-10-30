@@ -2,11 +2,11 @@
 
 Chess Royale is a Meta Quest VR chess prototype built with Unity and OpenXR. The current scene places the player in the middle of a large black-and-white board with human-sized chess pieces that can be grabbed nearby or dragged from a distance.
 
-Project history: [Sprint 1 summary and VR demo](SPRINT1.md).
+Sprint writeups live in [SPRINTS.md](SPRINTS.md): [Sprint 1](SPRINTS.md#sprint-1), [Sprint 2](SPRINTS.md#sprint-2), and [Sprint 3](SPRINTS.md#sprint-3).
 
-## Current state
+## The game
 
-The current Sprint 2 stack includes:
+The game includes:
 
 - A clean board made from 64 independent `ChessBoardSquare` objects.
 - Human-sized chess pieces using the Chess Mega Set asset models.
@@ -18,7 +18,7 @@ The current Sprint 2 stack includes:
 - Castling, en passant, and in-world pawn-promotion selection.
 - Photon Fusion shared-mode multiplayer for two players, with four-letter rooms, White and Black seats, synced moves, a shared chess clock, and a rematch that starts only after both players agree.
 
-This stack builds the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity`, including board teleportation and networked play. Background music and sound effects are included (see [Audio](#audio)).
+The project includes the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity`, with board teleportation and networked play. Background music and sound effects are included (see [Audio](#audio)).
 
 ## VR controls
 
@@ -82,32 +82,6 @@ The separately licensed Asset Store source folders and generated Unity/build dir
 | Sarina Liu | CS | Design Director |
 | Feiyuan Yang | CS | Asset Manager |
 
-# Sprint 3
-
-## Design
-
-### Start Screen
-Players spawn inside a grand hall facing an empty chessboard, with a floating **"Chess Royale"** title panel above it. The panel offers a **mode choice**: **One Player** (local) or **Two Player** (online), followed by a **Time Control** option. We start inside the environment instead of a flat menu, so the first thing the user sees is the space itself. That tells them right away that this is a calm, elegant, strategic experience. After the player picks a mode and a time control, the pieces animate onto the board and the chess clock starts.
-
-### Hands / Controllers
-- Default controller models are replaced with **gloved hands** that match the royal hall setting.
-- The hands change during the experience: pointer hands with a ray in menus, gloves without a ray during the match, and the pointer ray returns on the game-over screen for **Play Again**.
-
-### Networking (Multiplayer)
-Players choose between **One Player** and **Two Player** mode on the start screen. Two Player mode is online and uses **Photon**: players join each other through a **lobby**, so two people in different places can sit across the same board in the same hall. Each player sees their opponent's moves and the shared chess clock in real time. Playing against a real person makes the match feel social and competitive, not just a solo puzzle.
-
-# Sprint 2 Demo
-[Watch the Sprint 2 demo video](https://github.com/Vanderbilt-VR-2026/ChessRoyale/releases/tag/sprint-2-demo)
-
-## Sprint 2 contribution log
-
-| Team member | Work completed this sprint |
-|---|---|
-| RuoHan Chen | Migrated and populated the GitHub Kanban board; authored the product design requirements; built stable VR piece placement and snapping; implemented legal moves, turns, captures, move hints, complete chess rules, special moves, promotion, and correct board orientation. |
-| Derrick Seo | Worked on the blender and soundtracks. |
-| Sarina Liu | Added Background and Timer. Adjusted the lighting. Recorded the demo. |
-| Feiyuan Yang | Added VR teleportation limited to the board so players can move around without falling off; rebuilt the VR main menu (START/QUIT) with controller-ray interaction on the new board and set it as the first build scene; merged the main menu and teleportation onto the complete-rules stack; tested teleport boundaries and the main menu on Meta Quest 3. |
-
 ## Product sense: deliberate design vs. AI default
 
 AI tools tend to produce the "complete, generic" version of a feature: every rule implemented, every state shown as text, every flow covered. This section separates the features that exist because they make Chess Royale a better VR game from the ones that are there mainly because that is what an AI-assisted build produces by default, and says what to do about each.
@@ -132,7 +106,7 @@ AI tools tend to produce the "complete, generic" version of a feature: every rul
 | Every draw rule (threefold repetition, fifty-move rule, insufficient material) | Rule-complete chess is what an AI produces when asked for "chess." Casual VR sessions almost never reach these. | Keep, since the code already works, but don't spend black-box testing time on them before core moves, captures, and networking are solid. |
 | Game state shown as status text ("White to move — check") | Text is the generic way to show state. In VR, text on a panel is easy to miss when you're looking at pieces. | Keep the text, but lead with in-world signals: the red king glow, the check sound, and the turn indicator below. |
 | Disconnect immediately counts as a win for the other player | This is the simplest rule to implement. On Quest, short Wi-Fi drops and headset sleep are common, so a real player can lose a good game by accident. | Give a short reconnect window (for example, 30 seconds) before awarding the win. |
-| Fixed 10-minute clock for online games | One hard-coded value is the default. The Sprint 3 design calls for a time-control choice on the start screen. | Add two or three presets (for example, 5, 10, and untimed). |
+| Fixed 10-minute clock for online games | One hard-coded value is the default. The [Sprint 3 writeup](SPRINTS.md#sprint-3) calls for a time-control choice on the start screen. | Add two or three presets (for example, 5, 10, and untimed). |
 | Many navigation buttons (Leave, Lobby, Return to Lobby) on several screens | Covering every path is thorough, but each screen ends up with similar-looking options. | Black-box test the menus with someone new to the game and remove any button they don't need. |
 
 ### Suggested features for Sprint 3
@@ -158,13 +132,3 @@ AI-generated suggestions are reviewed through the pull-request workflow and shou
 Claude was also used as a step-by-step guide for configuring the XR Interaction Toolkit (world-space menu UI, controller ray interaction, teleportation areas and layers), explaining Git branching and merge-conflict resolution, troubleshooting Quest USB debugging, and drafting PR and README text. Start and end screen layouts were designed by the team, and AI helped write their code. All changes were configured, tested on Meta Quest 3, and debugged by the team.
 
 Claude was used to help write the `ChessAudio` sound system and to draft the product-sense section above; the audio was chosen, placed, and tested by the team, and the product-sense recommendations were reviewed and edited by the team.
-
-## Pull-request stack
-
-Review the current work in dependency order:
-
-1. [Checkered board and clean environment](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/17)
-2. [Stable VR chess-piece placement](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/23)
-3. [Legal moves, turns, hints, and captures](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/24)
-4. [Complete chess rules and promotion](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/25)
-5. [Sprint 2 documentation and contribution log](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/26)
