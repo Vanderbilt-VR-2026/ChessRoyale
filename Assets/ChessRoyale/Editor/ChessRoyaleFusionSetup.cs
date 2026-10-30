@@ -19,6 +19,7 @@ namespace ChessRoyale.Editor
         private const string GameStatePrefabPath = "Assets/ChessRoyale/Prefabs/Networking/ChessNetworkGameState.prefab";
         private const string ChessScenePath = "Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity";
         private const string RoomObjectName = "Chess Fusion Room";
+        private const string LobbyObjectName = "Chess Fusion Lobby";
 
         [MenuItem("Tools/Chess Royale/Configure Photon Fusion")]
         public static void Configure()
@@ -37,8 +38,8 @@ namespace ChessRoyale.Editor
             }
 
             Debug.Log(
-                "Chess Royale Photon Fusion foundation is configured. " +
-                "Shared Mode rooms are limited to 2 players. Offline chess is unchanged until a room is created or joined.");
+                "Chess Royale Photon Fusion chess state is configured. " +
+                "Shared Mode rooms use four-letter codes and are limited to 2 players.");
         }
 
         private static void ConfigurePlayerPrefab()
@@ -67,6 +68,9 @@ namespace ChessRoyale.Editor
                 SerializedObject serializedPlayer = new SerializedObject(player);
                 serializedPlayer.FindProperty("xrOrigin").objectReferenceValue = origin;
                 serializedPlayer.FindProperty("xrCamera").objectReferenceValue = camera;
+                serializedPlayer.FindProperty("head").objectReferenceValue = camera != null ? camera.transform : null;
+                serializedPlayer.FindProperty("leftHand").objectReferenceValue = FindChild(root.transform, "Left Controller");
+                serializedPlayer.FindProperty("rightHand").objectReferenceValue = FindChild(root.transform, "Right Controller");
                 serializedPlayer.ApplyModifiedPropertiesWithoutUndo();
 
                 new NetworkObjectBaker().Bake(root);
@@ -100,6 +104,10 @@ namespace ChessRoyale.Editor
             {
                 if (root.GetComponent<NetworkObject>() == null)
                     root.AddComponent<NetworkObject>();
+                if (root.GetComponent<ChessFusionLobbyState>() == null)
+                    root.AddComponent<ChessFusionLobbyState>();
+                if (root.GetComponent<ChessNetworkGameState>() == null)
+                    root.AddComponent<ChessNetworkGameState>();
 
                 new NetworkObjectBaker().Bake(root);
                 PrefabUtility.SaveAsPrefabAsset(root, GameStatePrefabPath);
@@ -159,8 +167,20 @@ namespace ChessRoyale.Editor
                 if (playerNetworkObject == null)
                     throw new InvalidOperationException("The Chess Network Player prefab needs a baked NetworkObject.");
 
+                GameObject gameStatePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(GameStatePrefabPath);
+                NetworkObject gameStateNetworkObject = gameStatePrefab != null ? gameStatePrefab.GetComponent<NetworkObject>() : null;
+                if (gameStateNetworkObject == null)
+                    throw new InvalidOperationException("The Chess Network Game State prefab needs a baked NetworkObject.");
+
+                Transform whiteSpawn = GetOrCreateSpawn(chessScene, "White Player Spawn", new Vector3(0f, 0.42f, -8f), Quaternion.identity);
+                Transform blackSpawn = GetOrCreateSpawn(chessScene, "Black Player Spawn", new Vector3(0f, 0.42f, 12f), Quaternion.Euler(0f, 180f, 0f));
+                EnsureLobby(chessScene);
+
                 SerializedObject serializedManager = new SerializedObject(keeper);
                 serializedManager.FindProperty("playerPrefab").objectReferenceValue = playerNetworkObject;
+                serializedManager.FindProperty("gameStatePrefab").objectReferenceValue = gameStateNetworkObject;
+                serializedManager.FindProperty("whiteSpawn").objectReferenceValue = whiteSpawn;
+                serializedManager.FindProperty("blackSpawn").objectReferenceValue = blackSpawn;
                 serializedManager.ApplyModifiedPropertiesWithoutUndo();
 
                 EditorSceneManager.MarkSceneDirty(chessScene);
@@ -173,6 +193,44 @@ namespace ChessRoyale.Editor
                 if (openedScene && chessScene.IsValid())
                     EditorSceneManager.CloseScene(chessScene, true);
             }
+        }
+
+        private static Transform GetOrCreateSpawn(Scene scene, string objectName, Vector3 position, Quaternion rotation)
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                if (root.name == objectName)
+                    return root.transform;
+            }
+
+            GameObject spawn = new GameObject(objectName);
+            SceneManager.MoveGameObjectToScene(spawn, scene);
+            spawn.transform.SetPositionAndRotation(position, rotation);
+            return spawn.transform;
+        }
+
+        private static void EnsureLobby(Scene scene)
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                if (root.GetComponent<ChessFusionLobbyUI>() != null)
+                    return;
+            }
+
+            GameObject lobby = new GameObject(LobbyObjectName);
+            SceneManager.MoveGameObjectToScene(lobby, scene);
+            lobby.AddComponent<ChessFusionLobbyUI>();
+        }
+
+        private static Transform FindChild(Transform root, string childName)
+        {
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name == childName)
+                    return child;
+            }
+
+            return null;
         }
 
         private static void EnsureFolder(string path)
