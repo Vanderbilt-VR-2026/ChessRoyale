@@ -121,3 +121,7 @@ Direct grab for pieces, with the ray kept for menus. Hands that switch between a
 ### Next
 
 Limit the ray to menus, add the time presets, and keep the shared match in step when a player drops briefly and comes back.
+
+### Sprint 3 Demo Video
+
+[Watch Sprint 3 Demo on YouTube](https://youtu.be/OnBdmAllzGQ)
