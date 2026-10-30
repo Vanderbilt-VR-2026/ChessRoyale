@@ -69,3 +69,12 @@ Hands replace the controller models. Menus and the result screen use pointer han
 #### Networking
 
 Single Player is local. Multiplayer is online through Photon. Two players join a room and share one hall, the moves, and the chess clock.
+
+### Team Contributions
+
+| Team Member | Contributions |
+|---|---|
+| RuoHan Chen | Implemented multiplayer networking using Photon Fusion, including creating and joining game rooms, and worked on networking fixes and testing. |
+| Derrick Seo | Worked on background music, gameplay and UI sound effects, and product-sense documentation. |
+| Sarina Liu | Worked on multiplayer networking testing and troubleshooting and updated the GitHub project board. |
+| Feiyuan Yang | Updated Sprint 3 documentation and helped test and troubleshoot multiplayer networking. |
