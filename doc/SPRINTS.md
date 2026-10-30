@@ -1,6 +1,6 @@
 # Sprint writeups
 
-The [project README](README.md) describes the game as it is now. Each sprint's notes are here.
+The [project README](../README.md) describes the game as it is now. Each sprint's notes are here.
 
 ## Sprint 1
 

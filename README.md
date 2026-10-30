@@ -4,13 +4,13 @@ Chess Royale is a Meta Quest chess game. Two people share one hall and one giant
 
 It is built in Unity **6000.3.23f1** with OpenXR, the XR Interaction Toolkit, and Photon Fusion, for Meta Quest 3.
 
-Sprint writeups live in [SPRINTS.md](SPRINTS.md): [Sprint 1](SPRINTS.md#sprint-1), [Sprint 2](SPRINTS.md#sprint-2), and [Sprint 3](SPRINTS.md#sprint-3).
+Sprint writeups live in [doc/SPRINTS.md](doc/SPRINTS.md): [Sprint 1](doc/SPRINTS.md#sprint-1), [Sprint 2](doc/SPRINTS.md#sprint-2), and [Sprint 3](doc/SPRINTS.md#sprint-3).
 
 ## Getting started
 
 ### In the editor
 
-Open `Assets/ChessRoyale/Scenes/MainMenu.unity`. That scene is first in the build. It has **Single Player** and **Multiplayer**. Asset import and **Build and Run** are in [SETUP.md](SETUP.md).
+Open `Assets/ChessRoyale/Scenes/MainMenu.unity`. That scene is first in the build. It has **Single Player** and **Multiplayer**. Asset import and **Build and Run** are in [doc/SETUP.md](doc/SETUP.md).
 
 ### On a Quest
 
@@ -85,7 +85,7 @@ Game sounds come from watching `ChessGameController` state (turn, captures, chec
 
 ## Setup and Quest build
 
-See [SETUP.md](SETUP.md) for the full environment, Asset Store import, Unity scene-generation, editor-testing, and Meta Quest build instructions.
+See [doc/SETUP.md](doc/SETUP.md) for the full environment, Asset Store import, Unity scene-generation, editor-testing, and Meta Quest build instructions.
 
 Quick start:
 
@@ -131,7 +131,7 @@ AI tools tend to produce the "complete, generic" version of a feature: every rul
 | Every draw rule (threefold repetition, fifty-move rule, insufficient material) | Rule-complete chess is what an AI produces when asked for "chess." Casual VR sessions almost never reach these. | Keep, since the code already works, but don't spend black-box testing time on them before core moves, captures, and networking are solid. |
 | Game state shown as status text ("White to move — check") | Text is the generic way to show state. In VR, text on a panel is easy to miss when you're looking at pieces. | Keep the text, but lead with in-world signals: the red king glow, the check sound, and the turn indicator below. |
 | Disconnect immediately counts as a win for the other player | This is the simplest rule to implement. On Quest, short Wi-Fi drops and headset sleep are common, so a real player can lose a good game by accident. | Give a short reconnect window (for example, 30 seconds) before awarding the win. |
-| Fixed 10-minute clock for online games | One hard-coded value is the default. The [Sprint 3 writeup](SPRINTS.md#sprint-3) calls for a time-control choice on the start screen. | Add two or three presets (for example, 5, 10, and untimed). |
+| Fixed 10-minute clock for online games | One hard-coded value is the default. The [Sprint 3 writeup](doc/SPRINTS.md#sprint-3) calls for a time-control choice on the start screen. | Add two or three presets (for example, 5, 10, and untimed). |
 | Many navigation buttons (Leave, Lobby, Return to Lobby) on several screens | Covering every path is thorough, but each screen ends up with similar-looking options. | Black-box test the menus with someone new to the game and remove any button they don't need. |
 
 ### Suggested features for Sprint 3
