@@ -113,16 +113,16 @@ These features are in the game because they make Chess Royale a better fit for V
 
 ### Features that make sense for this game
 
-| Feature | Why it earns its place |
-|---|---|
-| Standing on a giant board with human-sized pieces | This is the core idea. It is something only VR can offer; a normal-sized board on a table would just be a worse version of 2D chess. |
-| Glowing move hints on squares | Pieces are big and the board is wide, so it is hard to see legal moves from the ground. The glow replaces looking down at a small board and makes the game approachable for people who don't know chess well. |
-| Starting inside the hall instead of a flat menu | The first thing the player sees sets the mood. It also means no separate 2D menu to design and maintain. |
-| Gloved hands that change between menu and match | Showing a pointer ray only when it is useful keeps the match uncluttered and makes grabbing feel physical. |
-| In-world promotion picker | A floating 2D dialog would break immersion; choosing the piece in the world keeps the player in the space. |
-| Four-letter room codes with an in-headset letter keyboard | Typing is hard in VR. A short, letters-only code is something a person can read across a room and tap in quickly. |
-| Rematch only when both players agree | Prevents one player from resetting the board on the other. |
-| Spatial sound for piece grabs and illegal moves (new) | On a board this big, sound coming from the piece helps the player notice what happened and where, without reading text. |
+| Feature                                                   | Why it earns its place                                                                                                                                                                                        |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Standing on a giant board with human-sized pieces         | This is the core idea. It is something only VR can offer; a normal-sized board on a table would just be a worse version of 2D chess.                                                                          |
+| Glowing move hints on squares                             | Pieces are big and the board is wide, so it is hard to see legal moves from the ground. The glow replaces looking down at a small board and makes the game approachable for people who don't know chess well. |
+| Starting inside the hall instead of a flat menu           | The first thing the player sees sets the mood. It also means no separate 2D menu to design and maintain.                                                                                                      |
+| Gloved hands that change between menu and match           | Showing a pointer ray only when it is useful keeps the match uncluttered and makes grabbing feel physical.                                                                                                    |
+| In-world promotion picker                                 | A floating 2D dialog would break immersion; choosing the piece in the world keeps the player in the space.                                                                                                    |
+| Four-letter room codes with an in-headset letter keyboard | Typing is hard in VR. A short, letters-only code is something a person can read across a room and tap in quickly.                                                                                             |
+| Rematch only when both players agree                      | Prevents one player from resetting the board on the other.                                                                                                                                                    |
+| Spatial sound for piece grabs and illegal moves           | On a board this big, sound coming from the piece helps the player notice what happened and where, without reading text.                                                                                       |
 
 ## AI usage
 
