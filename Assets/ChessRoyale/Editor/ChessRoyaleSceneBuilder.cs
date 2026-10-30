@@ -3,14 +3,17 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.Events;
 using UnityEditor.SceneManagement;
 using UnityEditor.XR.Management;
 using UnityEditor.XR.Management.Metadata;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
+using UnityEngine.XR.Interaction.Toolkit.UI;
 using UnityEngine.XR.Management;
 using UnityEngine.XR.OpenXR;
 using UnityEngine.XR.OpenXR.Features.Interactions;
@@ -31,6 +34,7 @@ namespace ChessRoyale.Editor
         private static Material blackMaterial;
         private static Material boardLightMaterial;
         private static Material boardDarkMaterial;
+        private static Material hintBoundaryMaterial;
 
         [MenuItem("Tools/Chess Royale/Build VR Scene")]
         public static void BuildScene()
@@ -42,8 +46,10 @@ namespace ChessRoyale.Editor
             CreateMaterials();
             CreateLighting();
             CreateBoard();
+            ChessGameController gameController = CreateGameController();
             CreatePieces();
             CreateXRPlayer();
+            CreatePromotionPanel(gameController);
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
@@ -142,6 +148,7 @@ namespace ChessRoyale.Editor
             blackMaterial = CreateMaterial("RoyalBlack", new Color(0.08f, 0.04f, 0.13f), new Color(0.55f, 0.04f, 0.75f));
             boardLightMaterial = CreateBoardMaterial("BoardSilver", Color.white);
             boardDarkMaterial = CreateBoardMaterial("BoardObsidian", Color.black);
+            hintBoundaryMaterial = CreateMaterial("MoveHintGlow", Color.white, Color.white * 1.5f);
         }
 
         private static Material CreateMaterial(string name, Color baseColor, Color emission)
@@ -212,10 +219,35 @@ namespace ChessRoyale.Editor
                     square.transform.SetParent(squares.transform, true);
                     square.transform.position = new Vector3(-7f + file * SquareSize, BoardTop + 0.025f, -5f + rank * SquareSize);
                     square.transform.localScale = new Vector3(1.98f, 0.05f, 1.98f);
-                    square.GetComponent<Renderer>().sharedMaterial = (file + rank) % 2 == 0 ? boardLightMaterial : boardDarkMaterial;
-                    square.AddComponent<ChessBoardSquare>().Initialize(file, rank);
+                    square.GetComponent<Renderer>().sharedMaterial = (file + rank) % 2 == 0 ? boardDarkMaterial : boardLightMaterial;
+                    GameObject hintBoundary = CreateHintBoundary(square.transform);
+                    square.AddComponent<ChessBoardSquare>().Initialize(file, rank, hintBoundary);
                 }
             }
+        }
+
+        private static GameObject CreateHintBoundary(Transform square)
+        {
+            GameObject boundary = new GameObject("Move Hint Boundary");
+            boundary.transform.SetParent(square, false);
+
+            CreateHintEdge(boundary.transform, "North", new Vector3(0f, 1.05f, 0.47f), new Vector3(0.96f, 0.65f, 0.035f));
+            CreateHintEdge(boundary.transform, "South", new Vector3(0f, 1.05f, -0.47f), new Vector3(0.96f, 0.65f, 0.035f));
+            CreateHintEdge(boundary.transform, "East", new Vector3(0.47f, 1.05f, 0f), new Vector3(0.035f, 0.65f, 0.96f));
+            CreateHintEdge(boundary.transform, "West", new Vector3(-0.47f, 1.05f, 0f), new Vector3(0.035f, 0.65f, 0.96f));
+            boundary.SetActive(false);
+            return boundary;
+        }
+
+        private static void CreateHintEdge(Transform parent, string name, Vector3 localPosition, Vector3 localScale)
+        {
+            GameObject edge = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            edge.name = name;
+            edge.transform.SetParent(parent, false);
+            edge.transform.localPosition = localPosition;
+            edge.transform.localScale = localScale;
+            edge.GetComponent<Renderer>().sharedMaterial = hintBoundaryMaterial;
+            UnityEngine.Object.DestroyImmediate(edge.GetComponent<Collider>());
         }
 
         private static void CreatePieces()
@@ -231,6 +263,12 @@ namespace ChessRoyale.Editor
                 CreatePiece("pawn", true, new Vector3(x, BoardTop, 7f), piecesRoot.transform, file);
                 CreatePiece(order[file], true, new Vector3(x, BoardTop, 9f), piecesRoot.transform, file);
             }
+        }
+
+        private static ChessGameController CreateGameController()
+        {
+            GameObject controller = new GameObject("Chess Game Controller — Legal Moves + Turns");
+            return controller.AddComponent<ChessGameController>();
         }
 
         private static void CreatePiece(string type, bool black, Vector3 boardPosition, Transform parent, int file)
@@ -287,6 +325,32 @@ namespace ChessRoyale.Editor
             interactable.Initialize(
                 black ? ChessPieceColor.Black : ChessPieceColor.White,
                 (ChessPieceType)Enum.Parse(typeof(ChessPieceType), type, true));
+
+            if (type == "pawn")
+                CreatePromotionModels(piece, black);
+        }
+
+        private static void CreatePromotionModels(GameObject pawn, bool black)
+        {
+            GameObject root = new GameObject("Promotion Models");
+            root.transform.SetParent(pawn.transform, false);
+
+            string[] promotionTypes = { "queen", "rook", "bishop", "knight" };
+            foreach (string type in promotionTypes)
+            {
+                string suffix = black ? " 1" : string.Empty;
+                string path = $"{ChessRoot}/prefabs/pieces/LowPoly1/{type}LowPoly1{suffix}.prefab";
+                GameObject model = InstantiatePrefab(LoadPrefab(path), root.transform,
+                    char.ToUpperInvariant(type[0]) + type.Substring(1));
+                model.transform.position = pawn.transform.position;
+                model.transform.rotation = pawn.transform.rotation;
+                FitObjectToHeight(model, TargetHeight(type));
+                PlaceBoundsBottomAt(model, BoardTop + 0.03f);
+                ApplyMaterial(model, black ? blackMaterial : whiteMaterial);
+                model.SetActive(false);
+            }
+
+            root.SetActive(false);
         }
 
         private static float TargetHeight(string type)
@@ -322,6 +386,87 @@ namespace ChessRoyale.Editor
                 camera.nearClipPlane = 0.05f;
                 camera.farClipPlane = 150f;
             }
+        }
+
+        private static void CreatePromotionPanel(ChessGameController controller)
+        {
+            GameObject panel = new GameObject("Promotion Panel — Choose Piece", typeof(RectTransform));
+            Canvas canvas = panel.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.sortingOrder = 20;
+            panel.AddComponent<CanvasScaler>();
+            panel.AddComponent<TrackedDeviceGraphicRaycaster>();
+
+            RectTransform panelRect = panel.GetComponent<RectTransform>();
+            panelRect.sizeDelta = new Vector2(920f, 300f);
+            panelRect.localScale = Vector3.one * 0.002f;
+
+            Image background = panel.AddComponent<Image>();
+            background.color = new Color(0.025f, 0.03f, 0.055f, 0.97f);
+
+            CreatePanelText(panelRect, "PROMOTE PAWN", new Vector2(0f, 95f), new Vector2(860f, 70f), 42);
+
+            string[] labels = { "QUEEN", "ROOK", "BISHOP", "KNIGHT" };
+            for (int index = 0; index < labels.Length; index++)
+            {
+                Button button = CreatePromotionButton(panelRect, labels[index], -315f + index * 210f);
+                switch (index)
+                {
+                    case 0:
+                        UnityEventTools.AddPersistentListener(button.onClick, controller.PromoteToQueen);
+                        break;
+                    case 1:
+                        UnityEventTools.AddPersistentListener(button.onClick, controller.PromoteToRook);
+                        break;
+                    case 2:
+                        UnityEventTools.AddPersistentListener(button.onClick, controller.PromoteToBishop);
+                        break;
+                    default:
+                        UnityEventTools.AddPersistentListener(button.onClick, controller.PromoteToKnight);
+                        break;
+                }
+            }
+
+            controller.ConfigurePromotionPanel(panel);
+            panel.SetActive(false);
+        }
+
+        private static Button CreatePromotionButton(RectTransform parent, string label, float x)
+        {
+            GameObject buttonObject = new GameObject($"{label} Button", typeof(RectTransform));
+            buttonObject.transform.SetParent(parent, false);
+            RectTransform rect = buttonObject.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(185f, 105f);
+            rect.anchoredPosition = new Vector2(x, -35f);
+
+            Image image = buttonObject.AddComponent<Image>();
+            image.color = new Color(0.08f, 0.32f, 0.62f, 1f);
+            Button button = buttonObject.AddComponent<Button>();
+            ColorBlock colors = button.colors;
+            colors.highlightedColor = new Color(0.15f, 0.58f, 1f, 1f);
+            colors.pressedColor = new Color(0.05f, 0.2f, 0.45f, 1f);
+            button.colors = colors;
+
+            CreatePanelText(rect, label, Vector2.zero, rect.sizeDelta, 28);
+            return button;
+        }
+
+        private static void CreatePanelText(RectTransform parent, string value, Vector2 position, Vector2 size, int fontSize)
+        {
+            GameObject textObject = new GameObject($"{value} Label", typeof(RectTransform));
+            textObject.transform.SetParent(parent, false);
+            RectTransform rect = textObject.GetComponent<RectTransform>();
+            rect.sizeDelta = size;
+            rect.anchoredPosition = position;
+
+            Text text = textObject.AddComponent<Text>();
+            text.text = value;
+            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.fontSize = fontSize;
+            text.fontStyle = FontStyle.Bold;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.color = Color.white;
+            text.raycastTarget = false;
         }
 
         private static GameObject LoadPrefab(string path)
