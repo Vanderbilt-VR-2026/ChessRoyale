@@ -141,6 +141,17 @@ namespace ChessRoyale.Networking
             MatchReady = matchReady;
         }
 
+        public void ClearRematchForChangedSeat(PlayerRef previousWhite, PlayerRef white, PlayerRef previousBlack, PlayerRef black)
+        {
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority)
+                return;
+
+            if (previousWhite != white)
+                WhiteRematch = false;
+            if (previousBlack != black)
+                BlackRematch = false;
+        }
+
         public void PublishInitialBoard()
         {
             if (Object == null || !Object.IsValid || !Object.HasStateAuthority || MoveSequence != 0)

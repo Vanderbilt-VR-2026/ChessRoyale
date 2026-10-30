@@ -25,6 +25,7 @@ namespace ChessRoyale.Networking
         private NetworkObject localPlayer;
         private bool isStarting;
         private bool leavingIntentionally;
+        private int startGeneration;
         private bool spawnWhenSeated;
 
         public static ChessFusionRoomManager Instance { get; private set; }
@@ -47,19 +48,48 @@ namespace ChessRoyale.Networking
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureSceneRoomManager()
         {
-            if (Instance != null)
-                return;
-
             Scene scene = SceneManager.GetActiveScene();
-            if (scene.name != "ChessRoyaleVR")
+            if (!MainMenu.LaunchMultiplayer)
+            {
+                if (scene.name == "ChessRoyaleVR")
+                    DropNetworkingForSinglePlayer();
+                return;
+            }
+
+            if (Instance != null || scene.name != "ChessRoyaleVR")
                 return;
 
             GameObject roomObject = new GameObject("Chess Fusion Room");
             roomObject.AddComponent<ChessFusionRoomManager>();
         }
 
+        private static void DropNetworkingForSinglePlayer()
+        {
+            if (Instance != null)
+            {
+                ChessFusionRoomManager leftover = Instance;
+                _ = leftover.LeaveRoom();
+                Destroy(leftover.gameObject);
+            }
+
+            ChessFusionLobbyUI[] lobbies = FindObjectsByType<ChessFusionLobbyUI>(FindObjectsSortMode.None);
+            foreach (ChessFusionLobbyUI lobby in lobbies)
+            {
+                if (lobby != null)
+                    Destroy(lobby.gameObject);
+            }
+
+            ChessRoyale.ChessGameController.Instance?.SetNetworkPlay(false, false, false, ChessRoyale.ChessPieceColor.White);
+        }
+
         private void Awake()
         {
+            if (!MainMenu.LaunchMultiplayer)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
@@ -101,6 +131,7 @@ namespace ChessRoyale.Networking
 
         public async Task LeaveRoom()
         {
+            startGeneration++;
             NetworkRunner runnerToShutdown = runner;
             leavingIntentionally = true;
             runner = null;
@@ -169,6 +200,7 @@ namespace ChessRoyale.Networking
             }
 
             isStarting = true;
+            int generation = startGeneration;
             LastError = null;
             DisconnectNotice = null;
 
@@ -205,7 +237,7 @@ namespace ChessRoyale.Networking
                     ObjectProvider = objectProvider,
                 });
 
-                if (this == null)
+                if (this == null || generation != startGeneration)
                     return false;
 
                 if (!result.Ok)
@@ -272,6 +304,24 @@ namespace ChessRoyale.Networking
 
             if (runnerObject != null)
                 Destroy(runnerObject);
+        }
+
+        private static bool IsLocalConnectionFailure(ShutdownReason reason)
+        {
+            switch (reason)
+            {
+                case ShutdownReason.Error:
+                case ShutdownReason.PhotonCloudTimeout:
+                case ShutdownReason.ConnectionTimeout:
+                case ShutdownReason.ConnectionRefused:
+                case ShutdownReason.OperationTimeout:
+                case ShutdownReason.InvalidAuthentication:
+                case ShutdownReason.CustomAuthenticationFailed:
+                case ShutdownReason.AuthenticationTicketExpired:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static string DescribeStartFailure(bool createRoom, string roomCode, ShutdownReason reason)
@@ -384,7 +434,13 @@ namespace ChessRoyale.Networking
             CurrentRoomCode = null;
             RestoreSceneRigs();
             SyncNetworkPlay();
-            if (!leavingIntentionally && gameUnderway)
+            if (!leavingIntentionally && IsLocalConnectionFailure(shutdownReason))
+            {
+                DisconnectNotice = "Your connection to the room failed.";
+                LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
+                Debug.LogWarning(LastError, this);
+            }
+            else if (!leavingIntentionally && gameUnderway)
             {
                 ChessRoyale.ChessPieceColor disconnected = seat == ChessSeat.Black
                     ? ChessRoyale.ChessPieceColor.White
@@ -450,7 +506,7 @@ namespace ChessRoyale.Networking
 
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
             ChessSeat seat = lobby != null ? lobby.LocalSeat : ChessSeat.None;
-            if (seat == ChessSeat.None)
+            if (lobby == null || !lobby.MatchReady || seat == ChessSeat.None)
             {
                 spawnWhenSeated = true;
                 return;

@@ -72,11 +72,14 @@ namespace ChessRoyale.Networking
             if (ready)
                 OpponentLeft = false;
 
+            PlayerRef previousWhite = WhitePlayer;
+            PlayerRef previousBlack = BlackPlayer;
             WhitePlayer = white;
             BlackPlayer = black;
             MatchReady = ready;
             ChessNetworkGameState state = ChessNetworkGameState.Instance;
             state?.SetSeats(white, black, ready);
+            state?.ClearRematchForChangedSeat(previousWhite, white, previousBlack, black);
             if (becameReady && state != null && state.MoveSequence == 0)
                 state.PublishInitialBoard();
         }
