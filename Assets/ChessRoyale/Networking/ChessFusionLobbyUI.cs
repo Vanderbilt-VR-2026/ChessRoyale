@@ -39,6 +39,9 @@ namespace ChessRoyale.Networking
 
         public bool IsWaitingForOpponent => screen == LobbyScreen.Create;
 
+        // True on every lobby screen except while a match is being played; the hands use the ray there.
+        public bool ShowsMenu => screen != LobbyScreen.Playing;
+
         public string PendingRoomCode { get; private set; }
         private bool busy;
         private string joinMessage = "Type a four-letter room code.";
