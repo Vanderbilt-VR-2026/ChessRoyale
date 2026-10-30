@@ -182,6 +182,8 @@ namespace ChessRoyale
             ChessNetworkMoveCoordinator coordinator = ChessNetworkMoveCoordinator.Instance;
             if (coordinator != null && coordinator.IsOnline)
             {
+                if (!moveAllowed || destination == null)
+                    PlayRejectedSound(destination);
                 coordinator.SubmitReleasedMove(this, grabOriginSquare, destination, moveAllowed);
                 return;
             }
@@ -189,6 +191,7 @@ namespace ChessRoyale
             ChessGameController game = ChessGameController.Instance;
             if (!moveAllowed || destination == null)
             {
+                PlayRejectedSound(destination);
                 game?.CancelMove();
                 SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
                 return;
@@ -198,6 +201,7 @@ namespace ChessRoyale
             {
                 if (!game.TryMove(this, destination))
                 {
+                    PlayRejectedSound(destination);
                     SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
                     return;
                 }
@@ -214,6 +218,15 @@ namespace ChessRoyale
             hasMoved |= destination != currentSquare;
             SnapToSquare(destination);
             game?.FinishMovePresentation();
+        }
+
+        // Putting a piece back on the square it came from is not a mistake, so it stays silent.
+        private void PlayRejectedSound(ChessBoardSquare destination)
+        {
+            if (destination != null && destination == grabOriginSquare)
+                return;
+
+            ChessAudio.PlayAt(ChessSfx.Invalid, transform.position);
         }
 
         // A held piece follows the hand, but never leaves the board footprint or sinks below board level;
