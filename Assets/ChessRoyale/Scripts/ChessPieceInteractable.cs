@@ -39,10 +39,15 @@ namespace ChessRoyale
         private Quaternion startingRotation;
         private ChessBoardSquare startingSquare;
         private ChessBoardSquare grabOriginSquare;
+        private ChessPieceType startingPieceType;
+        private Renderer[] startingRenderers;
+        private Transform promotionModelsRoot;
         private float baseOffset;
         private bool moveAllowed;
         private bool captured;
         private bool boardSettlementPending;
+        private Bounds boardBounds;
+        private bool hasBoardBounds;
 
         public ChessPieceColor PieceColor => pieceColor;
         public ChessPieceType PieceType => pieceType;
@@ -62,6 +67,9 @@ namespace ChessRoyale
             body = GetComponent<Rigidbody>();
             startingPosition = transform.position;
             startingRotation = transform.rotation;
+            startingPieceType = pieceType;
+            promotionModelsRoot = transform.Find("Promotion Models");
+            startingRenderers = GetComponentsInChildren<Renderer>();
             baseOffset = CalculateBaseOffset();
 
             body.isKinematic = true;
@@ -101,6 +109,12 @@ namespace ChessRoyale
 
         private void LateUpdate()
         {
+            if (!captured && hasBoardBounds && grabInteractable != null && grabInteractable.isSelected)
+            {
+                ConfineToBoard();
+                return;
+            }
+
             if (captured || currentSquare == null || grabInteractable == null || grabInteractable.isSelected)
                 return;
 
@@ -117,6 +131,7 @@ namespace ChessRoyale
         private void OnGrabbed(SelectEnterEventArgs _)
         {
             grabOriginSquare = currentSquare;
+            hasBoardBounds = ChessBoardSquare.TryGetBoardBounds(out boardBounds);
             moveAllowed = ChessGameController.Instance == null || ChessGameController.Instance.BeginMove(this);
             boardSettlementPending = true;
             StopMotion();
@@ -141,6 +156,9 @@ namespace ChessRoyale
                     SnapToSquare(grabOriginSquare ?? currentSquare ?? startingSquare);
                     return;
                 }
+
+                game.FinishMovePresentation();
+                return;
             }
             else if (IsOccupiedByAnotherPiece(destination))
             {
@@ -153,6 +171,22 @@ namespace ChessRoyale
             game?.FinishMovePresentation();
         }
 
+        // A held piece follows the hand, but never leaves the board footprint or sinks below board level;
+        // only capture removes it.
+        private void ConfineToBoard()
+        {
+            Vector3 position = transform.position;
+            Vector3 confined = new Vector3(
+                Mathf.Clamp(position.x, boardBounds.min.x, boardBounds.max.x),
+                Mathf.Max(position.y, boardBounds.max.y + baseOffset),
+                Mathf.Clamp(position.z, boardBounds.min.z, boardBounds.max.z));
+            if (confined == position)
+                return;
+
+            transform.position = confined;
+            body.position = confined;
+        }
+
         public void ResetToStart()
         {
             if (!gameObject.activeSelf)
@@ -162,6 +196,7 @@ namespace ChessRoyale
             hasMoved = false;
             captured = false;
             boardSettlementPending = false;
+            RestoreStartingAppearance();
             if (startingSquare != null)
                 SnapToSquare(startingSquare);
             else
@@ -184,6 +219,29 @@ namespace ChessRoyale
             boardSettlementPending = false;
             StopMotion();
             gameObject.SetActive(false);
+        }
+
+        public void MoveToSquare(ChessBoardSquare square, bool markMoved = true)
+        {
+            if (square == null)
+                return;
+
+            if (markMoved && square != currentSquare)
+                hasMoved = true;
+            SnapToSquare(square);
+            boardSettlementPending = true;
+        }
+
+        public void PromoteTo(ChessPieceType promotedType)
+        {
+            if (startingPieceType != ChessPieceType.Pawn || promotedType == ChessPieceType.Pawn || promotedType == ChessPieceType.King)
+                return;
+
+            pieceType = promotedType;
+            SetPromotionAppearance(promotedType);
+            baseOffset = CalculateBaseOffset();
+            UpdateColliderToVisibleModel();
+            SnapToSquare(currentSquare);
         }
 
         private bool IsOccupiedByAnotherPiece(ChessBoardSquare square)
@@ -228,17 +286,75 @@ namespace ChessRoyale
             return new Vector3(square.Center.x, squareTop + baseOffset, square.Center.z);
         }
 
+        private void RestoreStartingAppearance()
+        {
+            pieceType = startingPieceType;
+            if (startingRenderers != null)
+            {
+                foreach (Renderer renderer in startingRenderers)
+                    renderer.enabled = true;
+            }
+
+            if (promotionModelsRoot != null)
+                promotionModelsRoot.gameObject.SetActive(false);
+
+            baseOffset = CalculateBaseOffset();
+            UpdateColliderToVisibleModel();
+        }
+
+        private void SetPromotionAppearance(ChessPieceType promotedType)
+        {
+            if (promotionModelsRoot == null)
+                return;
+
+            foreach (Renderer renderer in startingRenderers)
+                renderer.enabled = false;
+
+            promotionModelsRoot.gameObject.SetActive(true);
+            foreach (Transform option in promotionModelsRoot)
+                option.gameObject.SetActive(string.Equals(option.name, promotedType.ToString(), System.StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void UpdateColliderToVisibleModel()
+        {
+            List<Renderer> renderers = GetVisibleRenderers();
+            CapsuleCollider capsule = GetComponent<CapsuleCollider>();
+            if (renderers.Count == 0 || capsule == null)
+                return;
+
+            Bounds bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Count; i++)
+                bounds.Encapsulate(renderers[i].bounds);
+
+            float scale = Mathf.Max(0.0001f, transform.lossyScale.x);
+            capsule.center = transform.InverseTransformPoint(bounds.center);
+            capsule.height = bounds.size.y / scale;
+            capsule.radius = Mathf.Max(bounds.size.x, bounds.size.z) * 0.42f / scale;
+        }
+
         private float CalculateBaseOffset()
         {
-            Renderer[] renderers = GetComponentsInChildren<Renderer>();
-            if (renderers.Length == 0)
+            List<Renderer> renderers = GetVisibleRenderers();
+            if (renderers.Count == 0)
                 return 0f;
 
             Bounds bounds = renderers[0].bounds;
-            for (int i = 1; i < renderers.Length; i++)
+            for (int i = 1; i < renderers.Count; i++)
                 bounds.Encapsulate(renderers[i].bounds);
 
             return transform.position.y - bounds.min.y;
+        }
+
+        private List<Renderer> GetVisibleRenderers()
+        {
+            List<Renderer> visible = new List<Renderer>();
+            foreach (Renderer renderer in GetComponentsInChildren<Renderer>())
+            {
+                if (renderer.enabled)
+                    visible.Add(renderer);
+            }
+
+            return visible;
         }
     }
 }
