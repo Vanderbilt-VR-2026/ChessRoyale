@@ -14,11 +14,11 @@ namespace ChessRoyale
         [SerializeField] private int rankIndex;
         [SerializeField] private GameObject hintBoundary;
 
-        private Renderer[] hintRenderers;
+        private GameObject moveRing;
+        private Mesh ringMesh;
+        private Renderer ringRenderer;
         private MaterialPropertyBlock materialProperties;
         private bool moveHintActive;
-        private bool captureHintActive;
-        private bool checkHintActive;
 
         public string Coordinate => coordinate;
         public int FileIndex => fileIndex;
@@ -27,7 +27,8 @@ namespace ChessRoyale
 
         private void Awake()
         {
-            CacheHintRenderers();
+            if (hintBoundary != null)
+                hintBoundary.SetActive(false);
         }
 
         private void OnEnable()
@@ -38,15 +39,13 @@ namespace ChessRoyale
         private void OnDisable()
         {
             ActiveSquares.Remove(this);
+            ClearMoveHint();
         }
 
-        private void Update()
+        private void OnDestroy()
         {
-            if (!checkHintActive)
-                return;
-
-            float pulse = 1.5f + Mathf.Sin(Time.unscaledTime * 5f) * 0.5f;
-            ApplyHintColor(new Color(1f, 0.05f, 0.03f, 1f), pulse);
+            if (ringMesh != null)
+                Destroy(ringMesh);
         }
 
         public void Initialize(int file, int rank, GameObject boundary = null)
@@ -56,7 +55,6 @@ namespace ChessRoyale
             coordinate = $"{(char)('A' + file)}{rank + 1}";
             name = $"Square {coordinate}";
             hintBoundary = boundary;
-            CacheHintRenderers();
             if (hintBoundary != null)
                 hintBoundary.SetActive(false);
         }
@@ -109,62 +107,83 @@ namespace ChessRoyale
 
         public void SetMoveHint(bool isCapture)
         {
+            // All legal destinations, including captures, use the same gold ring.
             moveHintActive = true;
-            captureHintActive = isCapture;
+            EnsureMoveRing();
             RefreshHintVisual();
         }
 
         public void ClearMoveHint()
         {
             moveHintActive = false;
-            captureHintActive = false;
             RefreshHintVisual();
         }
 
         public void SetCheckHint(bool enabled)
         {
-            checkHintActive = enabled;
+            // Check remains in the game status; no red board indicators.
             RefreshHintVisual();
         }
 
-        private void CacheHintRenderers()
+        private void EnsureMoveRing()
         {
-            if (materialProperties == null)
-                materialProperties = new MaterialPropertyBlock();
-            hintRenderers = hintBoundary != null
-                ? hintBoundary.GetComponentsInChildren<Renderer>(true)
-                : System.Array.Empty<Renderer>();
+            if (moveRing != null)
+                return;
+
+            const int segments = 32;
+            BoxCollider squareCollider = GetComponent<BoxCollider>();
+            Vector3 center = squareCollider.center;
+            float radius = Mathf.Min(squareCollider.size.x, squareCollider.size.z) * 0.36f;
+            float height = center.y + squareCollider.size.y * 0.5f
+                + 0.002f / Mathf.Max(Mathf.Abs(transform.lossyScale.y), 0.0001f);
+            var vertices = new Vector3[segments * 2];
+            var normals = new Vector3[vertices.Length];
+            var triangles = new int[segments * 6];
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = i * Mathf.PI * 2f / segments;
+                Vector3 direction = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+                Vector3 origin = new Vector3(center.x, height, center.z);
+                vertices[i * 2] = origin + direction * radius;
+                vertices[i * 2 + 1] = origin + direction * (radius * 0.88f);
+                normals[i * 2] = normals[i * 2 + 1] = Vector3.up;
+                int next = ((i + 1) % segments) * 2;
+                int offset = i * 6;
+                triangles[offset] = i * 2;
+                triangles[offset + 1] = i * 2 + 1;
+                triangles[offset + 2] = next;
+                triangles[offset + 3] = next;
+                triangles[offset + 4] = i * 2 + 1;
+                triangles[offset + 5] = next + 1;
+            }
+
+            ringMesh = new Mesh { name = "Legal Move Ring", vertices = vertices, normals = normals, triangles = triangles };
+            ringMesh.RecalculateBounds();
+            ringMesh.UploadMeshData(true);
+            moveRing = new GameObject("Golden Legal Move Ring");
+            moveRing.transform.SetParent(transform, false);
+            moveRing.AddComponent<MeshFilter>().sharedMesh = ringMesh;
+            ringRenderer = moveRing.AddComponent<MeshRenderer>();
+            Renderer source = hintBoundary != null ? hintBoundary.GetComponentInChildren<Renderer>(true) : null;
+            ringRenderer.sharedMaterial = source != null ? source.sharedMaterial : GetComponent<Renderer>().sharedMaterial;
+            ringRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            ringRenderer.receiveShadows = false;
+            ringRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+            ringRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            materialProperties = new MaterialPropertyBlock();
+            Color gold = new Color(1f, 0.68f, 0.16f, 1f);
+            materialProperties.SetColor("_BaseColor", gold);
+            materialProperties.SetColor("_Color", gold);
+            materialProperties.SetColor("_EmissionColor", gold * 1.2f);
+            ringRenderer.SetPropertyBlock(materialProperties);
         }
 
         private void RefreshHintVisual()
         {
-            if (hintBoundary == null)
-                return;
-
-            bool visible = checkHintActive || moveHintActive;
-            hintBoundary.SetActive(visible);
-            if (!visible)
-                return;
-
-            if (checkHintActive)
-                ApplyHintColor(new Color(1f, 0.05f, 0.03f, 1f), 1.5f);
-            else if (captureHintActive)
-                ApplyHintColor(new Color(1f, 0.2f, 0.05f, 1f), 1.25f);
-            else
-                ApplyHintColor(new Color(0.05f, 0.55f, 1f, 1f), 1.1f);
-        }
-
-        private void ApplyHintColor(Color color, float emissionStrength)
-        {
-            if (hintRenderers == null || hintRenderers.Length == 0)
-                CacheHintRenderers();
-
-            materialProperties.Clear();
-            materialProperties.SetColor("_BaseColor", color);
-            materialProperties.SetColor("_Color", color);
-            materialProperties.SetColor("_EmissionColor", color * emissionStrength);
-            foreach (Renderer hintRenderer in hintRenderers)
-                hintRenderer.SetPropertyBlock(materialProperties);
+            if (hintBoundary != null)
+                hintBoundary.SetActive(false);
+            if (moveRing != null)
+                moveRing.SetActive(moveHintActive);
         }
     }
 }
