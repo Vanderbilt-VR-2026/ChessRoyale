@@ -53,6 +53,7 @@ namespace ChessRoyale
         private Vector3 smoothTarget;
         private Bounds boardBounds;
         private bool hasBoardBounds;
+        private ChessCaptureEffect captureEffect;
 
         public ChessPieceColor PieceColor => pieceColor;
         public ChessPieceType PieceType => pieceType;
@@ -104,9 +105,23 @@ namespace ChessRoyale
 
         private void OnDisable()
         {
+            if (grabInteractable.isSelected)
+                ChessGameController.Instance?.CancelMove();
             ActivePieces.Remove(this);
             grabInteractable.selectEntered.RemoveListener(OnGrabbed);
             grabInteractable.selectExited.RemoveListener(OnReleased);
+        }
+
+        private void OnDestroy()
+        {
+            ClearCaptureEffect();
+        }
+
+        private void ClearCaptureEffect()
+        {
+            if (captureEffect != null)
+                captureEffect.Cancel();
+            captureEffect = null;
         }
 
         private void Update()
@@ -172,8 +187,17 @@ namespace ChessRoyale
             body.rotation = startingRotation;
         }
 
-        private void OnReleased(SelectExitEventArgs _)
+        private void OnReleased(SelectExitEventArgs args)
         {
+            if (args.isCanceled)
+            {
+                moveAllowed = false;
+                ChessGameController.Instance?.CancelMove();
+                if (!captured)
+                    SnapBackToCurrentSquare();
+                return;
+            }
+
             ChessBoardSquare destination = ChessBoardSquare.FindClosest(transform.position, MaximumSquareDropDistance);
             ChessNetworkMoveCoordinator coordinator = ChessNetworkMoveCoordinator.Instance;
             if (coordinator != null && coordinator.IsOnline)
@@ -243,6 +267,7 @@ namespace ChessRoyale
 
         public void ResetToStart()
         {
+            ClearCaptureEffect();
             if (!gameObject.activeSelf)
                 gameObject.SetActive(true);
 
@@ -315,6 +340,7 @@ namespace ChessRoyale
 
             if (captured || !gameObject.activeSelf)
             {
+                ClearCaptureEffect();
                 captured = false;
                 gameObject.SetActive(true);
             }
@@ -371,10 +397,14 @@ namespace ChessRoyale
 
         public void Capture()
         {
+            if (captured)
+                return;
+
             captured = true;
             currentSquare = null;
             boardSettlementPending = false;
             StopMotion();
+            captureEffect = ChessCaptureEffect.Play(transform);
             gameObject.SetActive(false);
         }
 

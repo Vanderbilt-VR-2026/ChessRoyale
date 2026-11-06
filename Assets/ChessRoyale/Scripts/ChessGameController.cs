@@ -226,6 +226,7 @@ namespace ChessRoyale
         {
             ClearMoveHints();
             if (!CanLocalPlayerMove(piece) || outcome != ChessGameOutcome.InProgress || pendingPromotionPiece != null ||
+                (networkSessionActive && networkAwaitingAuthority) ||
                 piece.CurrentSquare == null)
                 return false;
 
