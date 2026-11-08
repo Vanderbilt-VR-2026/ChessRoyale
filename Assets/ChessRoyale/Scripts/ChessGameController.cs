@@ -153,6 +153,7 @@ namespace ChessRoyale
         public void ConfigurePromotionPanel(GameObject panel)
         {
             promotionPanel = panel;
+            RefreshPromotionPresentation();
         }
 
         public void RegisterPiece(ChessPieceInteractable piece, ChessBoardSquare square)
@@ -397,6 +398,12 @@ namespace ChessRoyale
             pendingPromotionPiece = snapshot.PendingPromotionPieceId >= 0
                 ? FindPiece((byte)snapshot.PendingPromotionPieceId)
                 : null;
+            // A default/stale snapshot ID must not open promotion for an ordinary piece.
+            if (pendingPromotionPiece != null &&
+                (pendingPromotionPiece.IsCaptured || pendingPromotionPiece.PieceType != ChessPieceType.Pawn ||
+                 pendingPromotionPiece.CurrentSquare == null ||
+                 pendingPromotionPiece.CurrentSquare.RankIndex != (pendingPromotionPiece.PieceColor == ChessPieceColor.White ? 7 : 0)))
+                pendingPromotionPiece = null;
             enPassantTargetSquare = FindSquareByIndex(snapshot.EnPassantSquareIndex);
             enPassantVulnerablePawn = snapshot.EnPassantPawnId >= 0
                 ? FindPiece((byte)snapshot.EnPassantPawnId)
@@ -965,7 +972,8 @@ namespace ChessRoyale
             if (promotionPanel == null)
                 return;
 
-            if (networkSessionActive && (!networkHasSeat || pendingPromotionPiece == null || pendingPromotionPiece.PieceColor != networkSeatColor))
+            if (pendingPromotionPiece == null || outcome != ChessGameOutcome.InProgress ||
+                (networkSessionActive && (!networkHasSeat || pendingPromotionPiece.PieceColor != networkSeatColor)))
             {
                 promotionPanel.SetActive(false);
                 return;
@@ -975,7 +983,8 @@ namespace ChessRoyale
             if (camera != null)
             {
                 promotionPanel.transform.position = camera.transform.position + camera.transform.forward * 1.6f;
-                promotionPanel.transform.rotation = Quaternion.LookRotation(camera.transform.position - promotionPanel.transform.position, Vector3.up);
+                // World-space UI is read from its local -Z side; +Z points away from the player.
+                promotionPanel.transform.rotation = Quaternion.LookRotation(promotionPanel.transform.position - camera.transform.position, Vector3.up);
             }
             promotionPanel.SetActive(true);
         }
