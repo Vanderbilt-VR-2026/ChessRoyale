@@ -685,8 +685,54 @@ namespace ChessRoyale.Networking
             }
 
             GetSpawnPose(white, out Vector3 position, out Quaternion rotation);
-            origin.transform.SetPositionAndRotation(position, rotation);
+            EnsureGroundUnder(position);
+            PlaceRig(origin, position, rotation);
             return origin;
+        }
+
+        // The seats are past the ends of the board, where the only collider in the hall (the board's
+        // teleport platform) stops. Without ground there, the rig's gravity drops players forever.
+        // Give the marble floor a collider (it is just a visual box), or failing that, a small pad.
+        private static void EnsureGroundUnder(Vector3 position)
+        {
+            if (HasGroundBelow(position))
+                return;
+
+            GameObject floor = GameObject.Find("Marble Floor");
+            if (floor != null && floor.GetComponent<Collider>() == null)
+            {
+                floor.AddComponent<BoxCollider>();
+                Physics.SyncTransforms();
+                if (HasGroundBelow(position))
+                    return;
+            }
+
+            GameObject pad = new GameObject("Seat Floor (generated)");
+            pad.transform.position = position + Vector3.down * 0.05f;
+            BoxCollider padCollider = pad.AddComponent<BoxCollider>();
+            padCollider.size = new Vector3(4f, 0.1f, 4f);
+            Physics.SyncTransforms();
+        }
+
+        private static bool HasGroundBelow(Vector3 position)
+        {
+            return Physics.Raycast(position + Vector3.up * 2f, Vector3.down, 8f, ~0, QueryTriggerInteraction.Ignore);
+        }
+
+        // A CharacterController keeps its own idea of where it is and would undo a plain transform move,
+        // so switch it off for the jump, sync physics, then switch it back on.
+        private static void PlaceRig(XROrigin origin, Vector3 position, Quaternion rotation)
+        {
+            CharacterController body = origin.GetComponent<CharacterController>();
+            bool bodyWasEnabled = body != null && body.enabled;
+            if (bodyWasEnabled)
+                body.enabled = false;
+
+            origin.transform.SetPositionAndRotation(position, rotation);
+            Physics.SyncTransforms();
+
+            if (bodyWasEnabled)
+                body.enabled = true;
         }
 
         private void RestoreRigPose()
@@ -697,7 +743,7 @@ namespace ChessRoyale.Networking
             rigPoseSaved = false;
             XROrigin origin = FindAnyObjectByType<XROrigin>();
             if (origin != null)
-                origin.transform.SetPositionAndRotation(savedRigPosition, savedRigRotation);
+                PlaceRig(origin, savedRigPosition, savedRigRotation);
         }
 
         private void GetSpawnPose(bool white, out Vector3 position, out Quaternion rotation)
