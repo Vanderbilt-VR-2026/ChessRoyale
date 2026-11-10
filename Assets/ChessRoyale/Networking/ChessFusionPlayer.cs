@@ -4,240 +4,163 @@ using UnityEngine;
 
 namespace ChessRoyale.Networking
 {
+    // A player's visible body in an online match, following the tutorial's Network Player pattern.
+    //
+    // Each headset keeps its own scene XR rig for seeing and interacting. This lightweight avatar
+    // (head, hands, body) is spawned by its owner, copies that rig's tracked poses every tick, and
+    // NetworkTransform components send the result to the other player. The owner hides its own copy,
+    // since its real hands are already visible.
     [DisallowMultipleComponent]
     [RequireComponent(typeof(NetworkObject))]
     public sealed class ChessFusionPlayer : NetworkBehaviour
     {
-        [SerializeField] private XROrigin xrOrigin;
-        [SerializeField] private Camera xrCamera;
+        private static readonly Color WhiteSeatColor = new Color(0.92f, 0.92f, 0.9f);
+        private static readonly Color BlackSeatColor = new Color(0.16f, 0.16f, 0.18f);
+        private static readonly Color UnseatedColor = new Color(0.75f, 0.75f, 0.78f);
+
         [SerializeField] private Transform head;
         [SerializeField] private Transform leftHand;
         [SerializeField] private Transform rightHand;
+        [SerializeField] private Transform body;
+        [SerializeField] private float bodyDropBelowHead = 0.75f;
 
-        [Networked] private NetworkBool HasPose { get; set; }
-        [Networked] private Vector3 RootPosition { get; set; }
-        [Networked] private Quaternion RootRotation { get; set; }
-        [Networked] private Vector3 HeadPosition { get; set; }
-        [Networked] private Quaternion HeadRotation { get; set; }
-        [Networked] private Vector3 LeftHandPosition { get; set; }
-        [Networked] private Quaternion LeftHandRotation { get; set; }
-        [Networked] private Vector3 RightHandPosition { get; set; }
-        [Networked] private Quaternion RightHandRotation { get; set; }
+        // 0 = not seated, 1 = White, 2 = Black. Repaints the body when the value arrives.
+        [Networked, OnChangedRender(nameof(ApplySeatColor))]
+        public int SeatColor { get; set; }
 
-        private bool remoteMarkersCreated;
-        private bool remoteColored;
-        private Renderer bodyRenderer;
-        private Vector3 shownRootPosition;
-        private Quaternion shownRootRotation;
-        private Vector3 shownHeadPosition;
-        private Quaternion shownHeadRotation;
-        private Vector3 shownLeftPosition;
-        private Quaternion shownLeftRotation;
-        private Vector3 shownRightPosition;
-        private Quaternion shownRightRotation;
-        private bool hasShownPose;
+        private Transform headSource;
+        private Transform leftSource;
+        private Transform rightSource;
+        private MaterialPropertyBlock colorBlock;
 
-        public bool IsLocalPlayer => Object != null && Object.IsValid && Object.HasInputAuthority;
-        public Camera XrCamera => xrCamera;
+        public static ChessFusionPlayer Local { get; private set; }
 
-        private void Awake()
-        {
-            if (xrOrigin == null)
-                xrOrigin = GetComponent<XROrigin>() ?? GetComponentInChildren<XROrigin>(true);
-            if (xrCamera == null && xrOrigin != null)
-                xrCamera = xrOrigin.Camera;
-            if (xrCamera == null)
-                xrCamera = GetComponentInChildren<Camera>(true);
-            if (head == null && xrCamera != null)
-                head = xrCamera.transform;
-            if (leftHand == null)
-                leftHand = FindNamedChild("Left Controller");
-            if (rightHand == null)
-                rightHand = FindNamedChild("Right Controller");
-        }
+        public bool IsLocalPlayer => Object != null && Object.IsValid && Object.HasStateAuthority;
 
         public override void Spawned()
         {
-            ApplyOwnership();
-            ChessRoyale.ChessPlayerHands.Apply(transform);
-            if (!IsLocalPlayer)
-                EnsureRemoteMarkers();
+            if (Object.HasStateAuthority)
+            {
+                Local = this;
+                BindToLocalRig();
+                SetRenderersEnabled(false);
+            }
+            else
+            {
+                ChessRoyale.ChessPlayerHands.Apply(transform);
+            }
+
+            ApplySeatColor();
+        }
+
+        public override void Despawned(NetworkRunner runner, bool hasState)
+        {
+            if (Local == this)
+                Local = null;
         }
 
         public override void FixedUpdateNetwork()
         {
-            if (!IsLocalPlayer)
+            if (!Object.HasStateAuthority)
                 return;
 
-            RootPosition = transform.position;
-            RootRotation = transform.rotation;
-            Capture(head, out Vector3 headPosition, out Quaternion headRotation);
-            Capture(leftHand, out Vector3 leftPosition, out Quaternion leftRotation);
-            Capture(rightHand, out Vector3 rightPosition, out Quaternion rightRotation);
-            HeadPosition = headPosition;
-            HeadRotation = headRotation;
-            LeftHandPosition = leftPosition;
-            LeftHandRotation = leftRotation;
-            RightHandPosition = rightPosition;
-            RightHandRotation = rightRotation;
-            HasPose = true;
+            if (headSource == null)
+                BindToLocalRig();
+
+            Follow(head, headSource);
+            Follow(leftHand, leftSource);
+            Follow(rightHand, rightSource);
+            FollowBody();
+
+            int seat = CurrentSeatColor();
+            if (SeatColor != seat)
+                SeatColor = seat;
         }
 
-        public override void Render()
+        // Finds this headset's scene rig. Only the owner calls this; proxies never read local tracking.
+        private void BindToLocalRig()
         {
-            if (IsLocalPlayer || Object == null || !Object.IsValid || !HasPose)
+            XROrigin origin = FindAnyObjectByType<XROrigin>();
+            if (origin == null)
                 return;
 
-            float blend = hasShownPose ? 1f - Mathf.Exp(-Time.deltaTime * 14f) : 1f;
-            shownRootPosition = Vector3.Lerp(hasShownPose ? shownRootPosition : RootPosition, RootPosition, blend);
-            shownRootRotation = Quaternion.Slerp(hasShownPose ? shownRootRotation : RootRotation, RootRotation, blend);
-            shownHeadPosition = Vector3.Lerp(hasShownPose ? shownHeadPosition : HeadPosition, HeadPosition, blend);
-            shownHeadRotation = Quaternion.Slerp(hasShownPose ? shownHeadRotation : HeadRotation, HeadRotation, blend);
-            shownLeftPosition = Vector3.Lerp(hasShownPose ? shownLeftPosition : LeftHandPosition, LeftHandPosition, blend);
-            shownLeftRotation = Quaternion.Slerp(hasShownPose ? shownLeftRotation : LeftHandRotation, LeftHandRotation, blend);
-            shownRightPosition = Vector3.Lerp(hasShownPose ? shownRightPosition : RightHandPosition, RightHandPosition, blend);
-            shownRightRotation = Quaternion.Slerp(hasShownPose ? shownRightRotation : RightHandRotation, RightHandRotation, blend);
-            hasShownPose = true;
-
-            transform.SetPositionAndRotation(shownRootPosition, shownRootRotation);
-            ApplyPose(head, shownHeadPosition, shownHeadRotation);
-            ApplyPose(leftHand, shownLeftPosition, shownLeftRotation);
-            ApplyPose(rightHand, shownRightPosition, shownRightRotation);
-            if (!remoteMarkersCreated)
-                EnsureRemoteMarkers();
-            ColorRemoteBody();
+            headSource = origin.Camera != null ? origin.Camera.transform : null;
+            leftSource = FindNamedChild(origin.transform, "Left Controller");
+            rightSource = FindNamedChild(origin.transform, "Right Controller");
         }
 
-        private void ApplyOwnership()
+        private static void Follow(Transform target, Transform source)
         {
-            if (Object == null || !Object.IsValid)
+            if (target == null || source == null)
                 return;
 
-            bool isLocal = Object.HasInputAuthority;
-            if (xrCamera != null)
-                xrCamera.enabled = isLocal;
+            target.SetPositionAndRotation(source.position, source.rotation);
+        }
 
-            foreach (AudioListener listener in GetComponentsInChildren<AudioListener>(true))
-                listener.enabled = isLocal;
+        // The body hangs below the head and turns with it, but only left/right, so looking down
+        // does not tip the whole avatar over.
+        private void FollowBody()
+        {
+            if (body == null || headSource == null)
+                return;
 
-            foreach (UnityEngine.Behaviour behaviour in GetComponentsInChildren<UnityEngine.Behaviour>(true))
+            Vector3 forward = Vector3.ProjectOnPlane(headSource.forward, Vector3.up);
+            if (forward.sqrMagnitude < 0.0001f)
+                forward = Vector3.ProjectOnPlane(headSource.up, Vector3.up);
+            Quaternion yaw = forward.sqrMagnitude < 0.0001f ? Quaternion.identity : Quaternion.LookRotation(forward.normalized, Vector3.up);
+            body.SetPositionAndRotation(headSource.position + Vector3.down * bodyDropBelowHead, yaw);
+        }
+
+        private int CurrentSeatColor()
+        {
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            if (lobby == null)
+                return 0;
+
+            switch (lobby.LocalSeat)
             {
-                if (behaviour == null || behaviour == this)
-                    continue;
-                if (!IsRemoteOnlyBehaviour(behaviour))
-                    continue;
-
-                behaviour.enabled = isLocal;
+                case ChessSeat.White:
+                    return 1;
+                case ChessSeat.Black:
+                    return 2;
+                default:
+                    return 0;
             }
         }
 
-        private void EnsureRemoteMarkers()
+        private void ApplySeatColor()
         {
-            if (remoteMarkersCreated || IsLocalPlayer)
+            if (body == null)
                 return;
 
-            bodyRenderer = AddMarker(transform, new Color(0.75f, 0.75f, 0.78f), new Vector3(0f, 1f, 0f), new Vector3(0.45f, 0.9f, 0.45f), PrimitiveType.Capsule);
-            AddMarker(head, new Color(0.93f, 0.86f, 0.62f), Vector3.zero, Vector3.one * 0.28f, PrimitiveType.Sphere);
-            remoteMarkersCreated = true;
+            Color color = SeatColor == 1 ? WhiteSeatColor : SeatColor == 2 ? BlackSeatColor : UnseatedColor;
+            if (colorBlock == null)
+                colorBlock = new MaterialPropertyBlock();
+
+            foreach (Renderer renderer in body.GetComponentsInChildren<Renderer>(true))
+            {
+                renderer.GetPropertyBlock(colorBlock);
+                colorBlock.SetColor("_BaseColor", color);
+                colorBlock.SetColor("_Color", color);
+                renderer.SetPropertyBlock(colorBlock);
+            }
         }
 
-        private void ColorRemoteBody()
+        private void SetRenderersEnabled(bool enabled)
         {
-            if (remoteColored || bodyRenderer == null || Runner == null || Object == null)
-                return;
-
-            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
-            if (lobby == null)
-                return;
-
-            bool white = Object.InputAuthority == lobby.WhitePlayer;
-            bool black = Object.InputAuthority == lobby.BlackPlayer;
-            if (!white && !black)
-                return;
-
-            remoteColored = true;
-            bodyRenderer.material.color = white
-                ? new Color(0.92f, 0.92f, 0.9f)
-                : new Color(0.16f, 0.16f, 0.18f);
+            foreach (Renderer renderer in GetComponentsInChildren<Renderer>(true))
+                renderer.enabled = enabled;
         }
 
-        private static Renderer AddMarker(Transform parent, Color color, Vector3 localPosition, Vector3 localScale, PrimitiveType primitive)
+        private static Transform FindNamedChild(Transform root, string childName)
         {
-            if (parent == null)
-                return null;
-
-            GameObject marker = GameObject.CreatePrimitive(primitive);
-            marker.name = "Remote Pose Marker";
-            marker.transform.SetParent(parent, false);
-            marker.transform.localPosition = localPosition;
-            marker.transform.localRotation = Quaternion.identity;
-            marker.transform.localScale = localScale;
-            Collider collider = marker.GetComponent<Collider>();
-            if (collider != null)
-                Destroy(collider);
-
-            Renderer renderer = marker.GetComponent<Renderer>();
-            if (renderer == null)
-                return null;
-
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (shader == null)
-                shader = Shader.Find("Unlit/Color");
-            if (shader == null)
-                return renderer;
-
-            renderer.material = new Material(shader) { color = color };
-            return renderer;
-        }
-
-        private Transform FindNamedChild(string childName)
-        {
-            foreach (Transform child in GetComponentsInChildren<Transform>(true))
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
             {
                 if (child.name == childName)
                     return child;
             }
 
             return null;
-        }
-
-        private static void Capture(Transform source, out Vector3 position, out Quaternion rotation)
-        {
-            if (source == null)
-            {
-                position = Vector3.zero;
-                rotation = Quaternion.identity;
-                return;
-            }
-
-            position = source.position;
-            rotation = source.rotation;
-        }
-
-        private static void ApplyPose(Transform target, Vector3 position, Quaternion rotation)
-        {
-            if (target == null)
-                return;
-
-            target.SetPositionAndRotation(position, rotation);
-        }
-
-        private static bool IsRemoteOnlyBehaviour(UnityEngine.Behaviour behaviour)
-        {
-            string typeName = behaviour.GetType().Name;
-            return typeName == "TrackedPoseDriver"
-                || typeName == "ActionBasedController"
-                || typeName == "XRController"
-                || typeName == "LocomotionMediator"
-                || typeName == "ContinuousMoveProvider"
-                || typeName == "DynamicMoveProvider"
-                || typeName == "GrabMoveProvider"
-                || typeName == "ContinuousTurnProvider"
-                || typeName == "SnapTurnProvider"
-                || typeName == "TeleportationProvider"
-                || typeName == "XRRayInteractor"
-                || typeName == "NearFarInteractor"
-                || typeName == "XRDirectInteractor";
         }
     }
 }

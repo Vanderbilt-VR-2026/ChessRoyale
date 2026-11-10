@@ -23,6 +23,15 @@ namespace ChessRoyale.Networking
             return !string.IsNullOrWhiteSpace(settings.AppSettings.AppIdFusion);
         }
 
+        // Voice chat is optional and uses its own Photon app. An empty Voice App ID turns voice off.
+        public static bool HasVoiceAppId()
+        {
+            if (!PhotonAppSettings.TryGetGlobal(out PhotonAppSettings settings) || settings == null)
+                return false;
+
+            return !string.IsNullOrWhiteSpace(settings.AppSettings.AppIdVoice);
+        }
+
         public static bool TryValidate(Object context, out string error)
         {
             if (HasFusionAppId())

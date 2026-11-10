@@ -143,6 +143,8 @@ namespace ChessRoyale
         {
             // Result stings can run several seconds, so the music dips under them instead of competing.
             bool ducked = Time.unscaledTime < musicDuckedUntil;
+            if (Time.frameCount % 60 == 0)
+                EnsureListener();
             musicSource.volume = Mathf.MoveTowards(musicSource.volume,
                 ducked ? musicVolume * MusicDuckLevel : musicVolume, Time.unscaledDeltaTime);
             UpdateMusic();
@@ -176,6 +178,33 @@ namespace ChessRoyale
 
             if (missing.Count > 0)
                 Debug.Log($"ChessAudio: no clip for {string.Join(", ", missing)} in Resources/{ClipFolder}. Those sounds are skipped.");
+
+            // The clips are imported without "Preload Audio Data", so load them now. Otherwise each sound
+            // loads the first time it plays, which can make it silent on Quest.
+            foreach (AudioClip clip in clips.Values)
+                clip.LoadAudioData();
+            if (gameMusic != null)
+                gameMusic.LoadAudioData();
+            if (menuMusic != null)
+                menuMusic.LoadAudioData();
+
+            Debug.Log($"ChessAudio: loaded {clips.Count} sound effects; music {(gameMusic != null ? "found" : "MISSING")}; " +
+                      $"audio output {(AudioSettings.GetConfiguration().speakerMode)}, {AudioSettings.outputSampleRate} Hz.");
+        }
+
+        // Unity only plays sound through an enabled AudioListener (normally on the headset camera).
+        // Report it if a scene has none, and put one on the main camera so the game is never silent.
+        private void EnsureListener()
+        {
+            if (FindAnyObjectByType<AudioListener>() != null)
+                return;
+
+            Camera main = Camera.main;
+            if (main == null)
+                return;
+
+            main.gameObject.AddComponent<AudioListener>();
+            Debug.LogWarning($"ChessAudio: no AudioListener in scene '{UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}'; added one to {main.name}.");
         }
 
         // The menu uses music_menu when it exists; everything else, and the menu without its own track, uses music_game.
