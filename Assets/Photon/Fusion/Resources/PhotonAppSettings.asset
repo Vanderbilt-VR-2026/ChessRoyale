@@ -19,9 +19,9 @@ MonoBehaviour:
     AppIdChat: 
     AppIdVoice: 
     AppIdVideo: 
-    AppVersion: 
+    AppVersion: chessroyale-1
     UseNameServer: 1
-    FixedRegion: 
+    FixedRegion: us
     Server: 
     Port: 0
     ProxyServer: 
