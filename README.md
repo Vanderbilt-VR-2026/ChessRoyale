@@ -1,12 +1,38 @@
 # Chess Royale
 
-Chess Royale is a Meta Quest VR chess prototype built with Unity and OpenXR. The current scene places the player in the middle of a large black-and-white board with human-sized chess pieces that can be grabbed nearby or dragged from a distance.
+Chess Royale is a Meta Quest chess game. Two people share one hall and one giant board, or one person plays both sides.
 
-Project history: [Sprint 1 summary and VR demo](SPRINT1.md).
+It is built in Unity **6000.3.23f1** with OpenXR, the XR Interaction Toolkit, and Photon Fusion, for Meta Quest 3.
 
-## Current state
+Sprint writeups live in [doc/SPRINTS.md](doc/SPRINTS.md): [Sprint 1](doc/SPRINT1.md), [Sprint 2](doc/SPRINT2.md), and [Sprint 3](doc/SPRINT3.md).
 
-The current Sprint 2 stack includes:
+## Getting started
+
+### In the editor
+
+Open `Assets/ChessRoyale/Scenes/MainMenu.unity`. That scene is first in the build. It has **Single Player** and **Multiplayer**. Asset import and **Build and Run** are in [doc/SETUP.md](doc/SETUP.md).
+
+### On a Quest
+
+The Sprint 3 branch includes [chessRoyale.apk](chessRoyale.apk), the October 29 Quest build. That file does not include the newer networking. Uninstall any older Chess Royale from the headset, copy the APK onto the headset, and install it there.
+
+## How a match goes
+
+**Single player.** Main menu, Single Player. The player moves White, then Black. There is no clock. Leave returns to the main menu. Photon does not start.
+
+**Multiplayer.** Main menu, Multiplayer, then Join or Create. Leave on that screen returns to the main menu. Create shows a four-letter code, and Lobby returns to Join or Create, including while the room is still connecting. Join uses an A–Z keyboard on the panel. A missing room stays on the join screen. The clock appears when both players are in. Lobby on the clock leaves the match. At the end the panel says You Win, You Lose, or Draw, then Rematch or Return to Lobby. Rematch starts only after both players agree.
+
+## What is true today
+
+- A nearby grip and a far ray can both move a piece.
+- The clock stays hidden until both players are in the room.
+- Rematch waits until both players agree.
+- Single player does not open a Photon session.
+- If a headset drops mid-game, it tries to rejoin for 25 seconds. The other player holds that seat for 30 seconds.
+
+## The game
+
+The game includes:
 
 - A clean board made from 64 independent `ChessBoardSquare` objects.
 - Human-sized chess pieces using the Chess Mega Set asset models.
@@ -18,7 +44,7 @@ The current Sprint 2 stack includes:
 - Castling, en passant, and in-world pawn-promotion selection.
 - Photon Fusion shared-mode multiplayer for two players, with four-letter rooms, White and Black seats, synced moves, a shared chess clock, and a rematch that starts only after both players agree.
 
-This stack builds the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity`, including board teleportation and networked play. Background music and sound effects are included (see [Audio](#audio)).
+The project includes the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity`, with board teleportation and networked play. Background music and sound effects are included (see [Audio](#audio)).
 
 ## VR controls
 
@@ -94,7 +120,7 @@ Chess moves are not physics objects: a player's move is sent to the room's autho
 
 ## Setup and Quest build
 
-See [SETUP.md](SETUP.md) for the full environment, Asset Store import, Unity scene-generation, editor-testing, and Meta Quest build instructions.
+See [doc/SETUP.md](doc/SETUP.md) for the full environment, Asset Store import, Unity scene-generation, editor-testing, and Meta Quest build instructions.
 
 Quick start:
 
@@ -107,30 +133,18 @@ Quick start:
 
 The separately licensed Asset Store source folders and generated Unity/build directories are intentionally excluded from Git.
 
-## Team roles
+## Team
 
-| Team member | Major | Role |
-|---|---|---|
-| RuoHan Chen | CS | GitHub Manager |
-| Derrick Seo | CS | Communications Director |
-| Sarina Liu | CS | Design Director |
-| Feiyuan Yang | CS | Asset Manager |
+| Team member | Major | Role | Owns |
+|---|---|---|---|
+| RuoHan Chen | CS | GitHub Manager | Chess rules, piece placement, Photon rooms, and match sync |
+| Derrick Seo | CS | Communications Director | Music and sound effects |
+| Sarina Liu | CS | Design Director | Hall, lighting, timer, and the Sprint 3 design notes |
+| Feiyuan Yang | CS | Asset Manager | Teleportation, the VR main menu, and sprint documentation |
 
-# Sprint 2 Demo
-[Watch the Sprint 2 demo video](https://github.com/Vanderbilt-VR-2026/ChessRoyale/releases/tag/sprint-2-demo)
+## Product sense
 
-## Sprint 2 contribution log
-
-| Team member | Work completed this sprint |
-|---|---|
-| RuoHan Chen | Migrated and populated the GitHub Kanban board; authored the product design requirements; built stable VR piece placement and snapping; implemented legal moves, turns, captures, move hints, complete chess rules, special moves, promotion, and correct board orientation. |
-| Derrick Seo | Worked on the blender and soundtracks. |
-| Sarina Liu | Added Background and Timer. Adjusted the lighting. Recorded the demo. |
-| Feiyuan Yang | Added VR teleportation limited to the board so players can move around without falling off; rebuilt the VR main menu (START/QUIT) with controller-ray interaction on the new board and set it as the first build scene; merged the main menu and teleportation onto the complete-rules stack; tested teleport boundaries and the main menu on Meta Quest 3. |
-
-## Product sense: deliberate design vs. AI default
-
-AI tools tend to produce the "complete, generic" version of a feature: every rule implemented, every state shown as text, every flow covered. This section separates the features that exist because they make Chess Royale a better VR game from the ones that are there mainly because that is what an AI-assisted build produces by default, and says what to do about each.
+These features are in the game because they make Chess Royale a better fit for VR.
 
 ### Features that make sense for this game
 
@@ -143,26 +157,7 @@ AI tools tend to produce the "complete, generic" version of a feature: every rul
 | In-world promotion picker | A floating 2D dialog would break immersion; choosing the piece in the world keeps the player in the space. |
 | Four-letter room codes with an in-headset letter keyboard | Typing is hard in VR. A short, letters-only code is something a person can read across a room and tap in quickly. |
 | Rematch only when both players agree | Prevents one player from resetting the board on the other. |
-| Spatial sound for piece grabs and illegal moves (new) | On a board this big, sound coming from the piece helps the player notice what happened and where, without reading text. |
-
-### Features that look like AI defaults
-
-| Feature | Why it reads as a default | Recommendation |
-|---|---|---|
-| Every draw rule (threefold repetition, fifty-move rule, insufficient material) | Rule-complete chess is what an AI produces when asked for "chess." Casual VR sessions almost never reach these. | Keep, since the code already works, but don't spend black-box testing time on them before core moves, captures, and networking are solid. |
-| Game state shown as status text ("White to move — check") | Text is the generic way to show state. In VR, text on a panel is easy to miss when you're looking at pieces. | Keep the text, but lead with in-world signals: the red king glow, the check sound, and the turn indicator below. |
-| Disconnect immediately counts as a win for the other player | This is the simplest rule to implement. On Quest, short Wi-Fi drops and headset sleep are common, so a real player can lose a good game by accident. | **Done:** a dropped player auto-rejoins, and their seat is held for 30 seconds before the win is awarded (see [Multiplayer](#multiplayer-photon-fusion)). |
-| Fixed 10-minute clock for online games | One hard-coded value is the default. The Sprint 3 design calls for a time-control choice on the start screen. | Add two or three presets (for example, 5, 10, and untimed). |
-| Many navigation buttons (Leave, Lobby, Return to Lobby) on several screens | Covering every path is thorough, but each screen ends up with similar-looking options. | Black-box test the menus with someone new to the game and remove any button they don't need. |
-
-### Suggested features for Sprint 3
-
-These come from what would make the game more fun to play, not from what is easy to generate:
-
-1. **Turn indicator in the world** (Feiyuan's idea): light up the active player's side of the board, or the edge of the board facing them. This matters more than a text label because players are looking at pieces, not panels.
-2. **A raised overview spot**: a teleport point above the board, so players can see the whole position. From ground level, the far side of a giant board is hard to read.
-3. **A capture moment**: a short visual effect with the capture sound, so captures feel like the "royale" in the name.
-4. **A hint toggle**: experienced players may want to turn the move glow off.
+| Spatial sound for piece grabs and illegal moves | On a board this big, sound coming from the piece helps the player notice what happened and where, without reading text. |
 
 ## AI usage
 
@@ -180,13 +175,3 @@ Claude was also used as a step-by-step guide for configuring the XR Interaction 
 Claude was used to help restructure the Photon Fusion networking to follow the class tutorial (network manager and runner prefab, master-client game state, avatars, voice, reconnect) and to review it for bugs; the team configured, built, and tested it on Meta Quest headsets.
 
 Claude was used to help write the `ChessAudio` sound system and to draft the product-sense section above; the audio was chosen, placed, and tested by the team, and the product-sense recommendations were reviewed and edited by the team.
-
-## Pull-request stack
-
-Review the current work in dependency order:
-
-1. [Checkered board and clean environment](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/17)
-2. [Stable VR chess-piece placement](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/23)
-3. [Legal moves, turns, hints, and captures](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/24)
-4. [Complete chess rules and promotion](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/25)
-5. [Sprint 2 documentation and contribution log](https://github.com/Vanderbilt-VR-2026/ChessRoyale/pull/26)
