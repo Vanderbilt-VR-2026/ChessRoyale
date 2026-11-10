@@ -58,6 +58,40 @@ Sounds are loaded by file name from `Assets/ChessRoyale/Resources/ChessRoyaleAud
 
 Game sounds come from watching `ChessGameController` state (turn, captures, check, result) instead of hooking `TryMove`, so an opponent's move that arrives over Photon sounds the same as a local one. Volumes for music, effects, and UI are on the `ChessAudio` object in Play Mode.
 
+## Multiplayer (Photon Fusion)
+
+Online play follows the structure of the class tutorial project (*Photon Fusion With Unity XR Interaction Toolkit*): Fusion **Shared mode**, a Fusion Network Manager, NetworkEvents, a master-client-owned shared object, NetworkTransform avatars that follow each player's own XR rig, and Photon Voice.
+
+| Tutorial piece | Chess Royale version |
+|---|---|
+| **Fusion Network Manager** object with a `NetworkRunner` and `NetworkEvents` | `Fusion Network Manager` in `ChessRoyaleVR` (`ChessFusionRoomManager`). Each Create/Join starts a fresh copy of `FusionNetworkRunner.prefab` (runner + NetworkEvents + scene manager + voice). Runners are single-use, so a fresh one per attempt is what makes Leave → Create and reconnecting work. |
+| Session name selects the room | A random four-letter room code is the session name. Join opens a letter keyboard. |
+| **Lobby controller** spawned by the master with `SharedModeStateAuthMasterClient` and *Is Master Client Object* on, *Destroy When State Authority Leaves* off | `ChessNetworkGameState.prefab` (seats, board snapshot, chess clock, rematch votes). Same flags, so if the room creator leaves, the other player takes over the room instead of losing it. |
+| **Network Player** avatar: head and hands with `NetworkTransform`, copied from the local XR rig; the owner hides its own copy | `ChessNetworkPlayer.prefab` (`ChessFusionPlayer`): head, gloved hands, and a body tinted to the player's color. Each headset keeps its own scene XR rig; it is moved to the White or Black side when the match starts. |
+| **Photon Voice**: `FusionVoiceClient` + `Recorder` following the Fusion room, speaker prefab for incoming voices | Same, on the runner prefab. The microphone only records after permission and once both connections are up. Voice is off when **App Id Voice** is empty. |
+| **Reconnect** on connection failure | If your headset drops mid-game, it automatically rejoins the same room code for up to 25 seconds. The other player's side holds your seat for 30 seconds (shown on the clock) before awarding the win. |
+
+Chess moves are not physics objects: a player's move is sent to the room's authority as a request, checked against the full rules, and the resulting board is published to both players. A request that gets no answer within 4 seconds returns the piece, so the board never locks up.
+
+### One-time multiplayer setup
+
+1. `Assets/Photon/Fusion/Resources/PhotonAppSettings.asset` already has the team's **App Id Fusion**, **Fixed Region** `us`, and **App Version** `chessroyale-1`. Every headset must use builds with the same three values.
+2. Optional voice chat: in the [Photon Dashboard](https://dashboard.photonengine.com/), create a **Voice** application and paste its ID into **App Id Voice** in the same asset.
+3. Let Unity finish importing the Photon Voice package (it is listed in `Packages/manifest.json` and needs Git installed).
+4. Run **Tools > Chess Royale > Configure Photon Fusion** once. It builds the avatar, game-state, runner, and voice-speaker prefabs, wires them to the Fusion Network Manager in `ChessRoyaleVR`, and rebuilds Fusion's prefab table. Commit the resulting prefab and scene changes.
+5. Build to every headset. One player taps **Multiplayer > Create** and reads out the code; the other taps **Join** and enters it.
+
+### Testing checklist (two headsets)
+
+| Try | Expect |
+|---|---|
+| Create on headset A, join on headset B | Both enter the match. A is White, B is Black, and each sees the other's head, hands, and body. |
+| Make moves on both sides | Both boards and clocks stay in sync. Illegal or out-of-turn moves snap back. |
+| Talk (with a Voice App ID) | Each player hears the other. |
+| Mid-game, turn off Wi-Fi on B for about 10 seconds, then back on | A's clock shows the 30-second countdown. B shows "Rejoining room…", then the match resumes with the same board. |
+| Mid-game, close the app on A (the room creator) | B keeps the room. After 30 seconds B wins by disconnect. |
+| Leave and Create again without restarting the app | A new room works. |
+
 ## Setup and Quest build
 
 See [SETUP.md](SETUP.md) for the full environment, Asset Store import, Unity scene-generation, editor-testing, and Meta Quest build instructions.
@@ -67,7 +101,7 @@ Quick start:
 1. Install Git LFS and clone the repository.
 2. Open the project with Unity **6000.3.23f1** and Android Build Support.
 3. Import the required Asset Store packages through **Window > Package Management > My Assets**.
-4. Choose **Tools > Chess Royale > Build VR Scene**.
+4. Choose **Tools > Chess Royale > Build VR Scene**, then **Tools > Chess Royale > Configure Photon Fusion** (see [Multiplayer](#multiplayer-photon-fusion)).
 5. Open `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity` and test it in Play Mode.
 6. Use **File > Build Profiles > Android > Build and Run** to install it on a developer-enabled Meta Quest.
 
@@ -117,7 +151,7 @@ AI tools tend to produce the "complete, generic" version of a feature: every rul
 |---|---|---|
 | Every draw rule (threefold repetition, fifty-move rule, insufficient material) | Rule-complete chess is what an AI produces when asked for "chess." Casual VR sessions almost never reach these. | Keep, since the code already works, but don't spend black-box testing time on them before core moves, captures, and networking are solid. |
 | Game state shown as status text ("White to move — check") | Text is the generic way to show state. In VR, text on a panel is easy to miss when you're looking at pieces. | Keep the text, but lead with in-world signals: the red king glow, the check sound, and the turn indicator below. |
-| Disconnect immediately counts as a win for the other player | This is the simplest rule to implement. On Quest, short Wi-Fi drops and headset sleep are common, so a real player can lose a good game by accident. | Give a short reconnect window (for example, 30 seconds) before awarding the win. |
+| Disconnect immediately counts as a win for the other player | This is the simplest rule to implement. On Quest, short Wi-Fi drops and headset sleep are common, so a real player can lose a good game by accident. | **Done:** a dropped player auto-rejoins, and their seat is held for 30 seconds before the win is awarded (see [Multiplayer](#multiplayer-photon-fusion)). |
 | Fixed 10-minute clock for online games | One hard-coded value is the default. The Sprint 3 design calls for a time-control choice on the start screen. | Add two or three presets (for example, 5, 10, and untimed). |
 | Many navigation buttons (Leave, Lobby, Return to Lobby) on several screens | Covering every path is thorough, but each screen ends up with similar-looking options. | Black-box test the menus with someone new to the game and remove any button they don't need. |
 
@@ -142,6 +176,8 @@ OpenAI ChatGPT and Codex were used under human direction to help:
 AI-generated suggestions are reviewed through the pull-request workflow and should be black-box tested in Unity and on Meta Quest before merge. AI is used as a development aid; it is not an in-game feature and does not make chess moves for the player.
 
 Claude was also used as a step-by-step guide for configuring the XR Interaction Toolkit (world-space menu UI, controller ray interaction, teleportation areas and layers), explaining Git branching and merge-conflict resolution, troubleshooting Quest USB debugging, and drafting PR and README text. Start and end screen layouts were designed by the team, and AI helped write their code. All changes were configured, tested on Meta Quest 3, and debugged by the team.
+
+Claude was used to help restructure the Photon Fusion networking to follow the class tutorial (network manager and runner prefab, master-client game state, avatars, voice, reconnect) and to review it for bugs; the team configured, built, and tested it on Meta Quest headsets.
 
 Claude was used to help write the `ChessAudio` sound system and to draft the product-sense section above; the audio was chosen, placed, and tested by the team, and the product-sense recommendations were reviewed and edited by the team.
 

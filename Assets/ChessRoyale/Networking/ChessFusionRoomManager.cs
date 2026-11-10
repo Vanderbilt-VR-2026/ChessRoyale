@@ -1,32 +1,60 @@
 using System;
-using System.Collections.Generic;
+using System.Collections;
 using System.Linq;
 using System.Threading.Tasks;
 using Fusion;
-using Fusion.Sockets;
+using Photon.Voice.Fusion;
+using Photon.Voice.Unity;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace ChessRoyale.Networking
 {
+    // Chess Royale's Fusion Network Manager. It lives in ChessRoyaleVR as the "Fusion Network Manager"
+    // object and follows the class tutorial's structure:
+    //
+    // - Each Create/Join starts a fresh copy of the "Fusion Network Runner" prefab, which carries the
+    //   NetworkRunner, NetworkEvents, the scene manager, and Photon Voice. Runners are single-use, so a
+    //   fresh one per attempt is what makes Leave -> Create and automatic reconnects possible.
+    // - NetworkEvents report joins, leaves, scene loads, and shutdowns back to this script.
+    // - The master client spawns one shared game-state object (seats, board, clock). It is a master
+    //   client object, so it survives the room creator leaving.
+    // - Each player spawns a lightweight avatar that follows their own scene XR rig.
     [DisallowMultipleComponent]
-    public sealed class ChessFusionRoomManager : MonoBehaviour, INetworkRunnerCallbacks
+    public sealed class ChessFusionRoomManager : MonoBehaviour
     {
         public const string TestRoomCode = "TEST";
 
+        [Header("Prefabs (set by Tools/Chess Royale/Configure Photon Fusion)")]
+        [SerializeField] private NetworkRunner runnerPrefab;
         [SerializeField] private NetworkObject playerPrefab;
         [SerializeField] private NetworkObject gameStatePrefab;
+
+        [Header("Seats")]
         [SerializeField] private Transform whiteSpawn;
         [SerializeField] private Transform blackSpawn;
 
-        private readonly System.Collections.Generic.List<GameObject> hiddenRigs = new System.Collections.Generic.List<GameObject>();
+        [Header("Reconnect")]
+        [Tooltip("Seconds between attempts to rejoin after this headset loses its connection mid-match.")]
+        [Min(1f)] [SerializeField] private float reconnectDelaySeconds = 3f;
+        [Tooltip("Stop trying after this long. Keep it under the 30-second seat hold in ChessNetworkGameState.")]
+        [Min(5f)] [SerializeField] private float reconnectWindowSeconds = 25f;
+
         private NetworkRunner runner;
         private NetworkObject localPlayer;
+        private FusionVoiceClient voiceClient;
+        private Recorder voiceRecorder;
+        private bool microphoneAllowed;
         private bool isStarting;
         private bool leavingIntentionally;
         private int startGeneration;
         private bool spawnWhenSeated;
+        private bool wasInReadyMatch;
+        private ShutdownReason lastStartFailure;
+        private bool rigPoseSaved;
+        private Vector3 savedRigPosition;
+        private Quaternion savedRigRotation;
 
         public static ChessFusionRoomManager Instance { get; private set; }
 
@@ -35,11 +63,14 @@ namespace ChessRoyale.Networking
         public string CurrentRoomCode { get; private set; }
         public string LastError { get; private set; }
         public string DisconnectNotice { get; private set; }
+        public bool IsReconnecting { get; private set; }
+        public string ReconnectStatus { get; private set; }
 
         public void ClearDisconnectNotice()
         {
             DisconnectNotice = null;
         }
+
         public bool IsConnected => runner != null && runner.IsRunning;
         public bool IsSharedModeMasterClient => IsConnected && runner.IsSharedModeMasterClient;
         public int PlayerCount => IsConnected ? runner.ActivePlayers.Count() : 0;
@@ -59,7 +90,7 @@ namespace ChessRoyale.Networking
             if (Instance != null || scene.name != "ChessRoyaleVR")
                 return;
 
-            GameObject roomObject = new GameObject("Chess Fusion Room");
+            GameObject roomObject = new GameObject("Fusion Network Manager");
             roomObject.AddComponent<ChessFusionRoomManager>();
         }
 
@@ -99,6 +130,9 @@ namespace ChessRoyale.Networking
             Instance = this;
             if (GetComponent<ChessNetworkMoveCoordinator>() == null)
                 gameObject.AddComponent<ChessNetworkMoveCoordinator>();
+
+            if (ChessFusionAppSettings.HasVoiceAppId())
+                StartCoroutine(RequestMicrophonePermission());
         }
 
         private void LateUpdate()
@@ -106,6 +140,7 @@ namespace ChessRoyale.Networking
             if (spawnWhenSeated)
                 SpawnLocalPlayer();
             SyncNetworkPlay();
+            UpdateVoiceRecording();
         }
 
         private void SyncNetworkPlay()
@@ -113,10 +148,15 @@ namespace ChessRoyale.Networking
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
             bool ready = IsConnected && lobby != null && lobby.MatchReady;
             bool seated = IsConnected && lobby != null && lobby.LocalSeat != ChessSeat.None;
+            if (IsConnected && lobby != null)
+                wasInReadyMatch = lobby.MatchReady && seated;
+
             ChessRoyale.ChessPieceColor seat = lobby != null && lobby.LocalSeat == ChessSeat.Black
                 ? ChessRoyale.ChessPieceColor.Black
                 : ChessRoyale.ChessPieceColor.White;
-            ChessRoyale.ChessGameController.Instance?.SetNetworkPlay(IsConnected, ready, seated, seat);
+
+            // While rejoining, stay "in a room" so the board stays locked instead of turning into a local game.
+            ChessRoyale.ChessGameController.Instance?.SetNetworkPlay(IsConnected || IsReconnecting, ready, seated, seat);
         }
 
         public Task<bool> CreateRoom(string roomCode)
@@ -134,23 +174,27 @@ namespace ChessRoyale.Networking
             startGeneration++;
             NetworkRunner runnerToShutdown = runner;
             leavingIntentionally = true;
+            IsReconnecting = false;
+            ReconnectStatus = null;
+            wasInReadyMatch = false;
             runner = null;
             localPlayer = null;
             spawnWhenSeated = false;
             CurrentRoomCode = null;
             DisconnectNotice = null;
+            ForgetVoice();
 
             if (runnerToShutdown == null)
             {
                 leavingIntentionally = false;
-                RestoreSceneRigs();
+                RestoreRigPose();
                 SyncNetworkPlay();
                 return;
             }
 
             try
             {
-                runnerToShutdown.RemoveCallbacks(this);
+                Unhook(runnerToShutdown);
                 if (runnerToShutdown.IsRunning)
                     await runnerToShutdown.Shutdown();
             }
@@ -163,7 +207,7 @@ namespace ChessRoyale.Networking
                 if (runnerToShutdown != null)
                     Destroy(runnerToShutdown.gameObject);
                 leavingIntentionally = false;
-                RestoreSceneRigs();
+                RestoreRigPose();
                 SyncNetworkPlay();
             }
 
@@ -186,9 +230,10 @@ namespace ChessRoyale.Networking
                 return false;
             }
 
-            if (!ChessFusionAppSettings.TryValidate(this, out string appIdError))
+            if (!ChessFusionAppSettings.TryValidate(this, out _))
             {
-                LastError = appIdError;
+                // The full setup steps go to the Console; the headset panel gets a short line that fits.
+                LastError = "This build has no Photon App ID. See the README's multiplayer setup.";
                 return false;
             }
 
@@ -202,39 +247,35 @@ namespace ChessRoyale.Networking
             isStarting = true;
             int generation = startGeneration;
             LastError = null;
-            DisconnectNotice = null;
+            lastStartFailure = ShutdownReason.Ok;
+            if (!IsReconnecting)
+                DisconnectNotice = null;
 
-            GameObject runnerObject = new GameObject("Chess Royale NetworkRunner");
+            NetworkRunner created = CreateRunner(roomCode);
             try
             {
-                runner = runnerObject.AddComponent<NetworkRunner>();
+                runner = created;
                 runner.ProvideInput = true;
-                runner.AddCallbacks(this);
 
                 if (transform.parent != null)
                     transform.SetParent(null, true);
                 DontDestroyOnLoad(gameObject);
-                DontDestroyOnLoad(runnerObject);
-
-                INetworkSceneManager sceneManager = runnerObject.AddComponent<NetworkSceneManagerDefault>();
-                INetworkObjectProvider objectProvider = runnerObject.AddComponent<NetworkObjectProviderDefault>();
+                DontDestroyOnLoad(created.gameObject);
 
                 Scene activeScene = SceneManager.GetActiveScene();
                 NetworkSceneInfo initialScene = new NetworkSceneInfo();
                 if (activeScene.buildIndex >= 0)
-                {
                     initialScene.AddSceneRef(SceneRef.FromIndex(activeScene.buildIndex), LoadSceneMode.Single);
-                }
 
-                StartGameResult result = await runner.StartGame(new StartGameArgs
+                StartGameResult result = await created.StartGame(new StartGameArgs
                 {
                     GameMode = GameMode.Shared,
                     SessionName = roomCode,
                     PlayerCount = MaximumPlayers,
                     EnableClientSessionCreation = createRoom,
                     Scene = initialScene,
-                    SceneManager = sceneManager,
-                    ObjectProvider = objectProvider,
+                    SceneManager = created.GetComponent<NetworkSceneManagerDefault>(),
+                    ObjectProvider = created.GetComponent<NetworkObjectProviderDefault>(),
                 });
 
                 if (this == null || generation != startGeneration)
@@ -242,9 +283,10 @@ namespace ChessRoyale.Networking
 
                 if (!result.Ok)
                 {
+                    lastStartFailure = result.ShutdownReason;
                     LastError = DescribeStartFailure(createRoom, roomCode, result.ShutdownReason);
                     Debug.LogError(LastError, this);
-                    await CleanupFailedConnection(runnerObject);
+                    await CleanupFailedConnection(created);
                     return false;
                 }
 
@@ -255,6 +297,12 @@ namespace ChessRoyale.Networking
                     await LeaveRoom();
                     return false;
                 }
+
+                // Like the tutorial: wait for the scene manager before spawning anything into the scene.
+                while (this != null && runner == created && created.IsRunning && created.IsSceneManagerBusy)
+                    await Task.Yield();
+                if (this == null || generation != startGeneration || runner != created || !created.IsRunning)
+                    return false;
 
                 CurrentRoomCode = roomCode;
                 SyncNetworkPlay();
@@ -271,7 +319,7 @@ namespace ChessRoyale.Networking
             {
                 LastError = exception.Message;
                 Debug.LogException(exception, this);
-                await CleanupFailedConnection(runnerObject);
+                await CleanupFailedConnection(created);
                 return false;
             }
             finally
@@ -280,30 +328,81 @@ namespace ChessRoyale.Networking
             }
         }
 
-        private async Task CleanupFailedConnection(GameObject runnerObject)
+        // A fresh runner from the "Fusion Network Runner" prefab. Without the prefab (setup tool not run
+        // yet), it builds a bare runner in code so multiplayer still works, just without voice chat.
+        private NetworkRunner CreateRunner(string roomCode)
         {
-            NetworkRunner failedRunner = runner;
-            runner = null;
-            CurrentRoomCode = null;
-
-            if (failedRunner != null)
+            NetworkRunner created;
+            if (runnerPrefab != null)
             {
-                failedRunner.RemoveCallbacks(this);
-                if (failedRunner.IsRunning)
+                created = Instantiate(runnerPrefab);
+            }
+            else
+            {
+                Debug.LogWarning("No Fusion Network Runner prefab assigned; voice chat is off. Run Tools/Chess Royale/Configure Photon Fusion.", this);
+                created = new GameObject().AddComponent<NetworkRunner>();
+            }
+
+            created.name = $"Fusion Network Runner ({roomCode})";
+            if (created.GetComponent<NetworkSceneManagerDefault>() == null)
+                created.gameObject.AddComponent<NetworkSceneManagerDefault>();
+            if (created.GetComponent<NetworkObjectProviderDefault>() == null)
+                created.gameObject.AddComponent<NetworkObjectProviderDefault>();
+
+            NetworkEvents events = created.GetComponent<NetworkEvents>();
+            if (events == null)
+                events = created.gameObject.AddComponent<NetworkEvents>();
+            events.PlayerJoined.AddListener(OnPlayerJoined);
+            events.PlayerLeft.AddListener(OnPlayerLeft);
+            events.OnSceneLoadDone.AddListener(OnSceneLoadDone);
+            events.OnShutdown.AddListener(OnRunnerShutdown);
+
+            SetUpVoice(created);
+            return created;
+        }
+
+        private void Unhook(NetworkRunner target)
+        {
+            if (target == null)
+                return;
+
+            NetworkEvents events = target.GetComponent<NetworkEvents>();
+            if (events == null)
+                return;
+
+            events.PlayerJoined.RemoveListener(OnPlayerJoined);
+            events.PlayerLeft.RemoveListener(OnPlayerLeft);
+            events.OnSceneLoadDone.RemoveListener(OnSceneLoadDone);
+            events.OnShutdown.RemoveListener(OnRunnerShutdown);
+        }
+
+        private async Task CleanupFailedConnection(NetworkRunner failedRunner)
+        {
+            if (runner == failedRunner)
+            {
+                runner = null;
+                CurrentRoomCode = null;
+                ForgetVoice();
+            }
+
+            if (failedRunner == null)
+                return;
+
+            Unhook(failedRunner);
+            if (failedRunner.IsRunning)
+            {
+                try
                 {
-                    try
-                    {
-                        await failedRunner.Shutdown();
-                    }
-                    catch (Exception exception)
-                    {
-                        Debug.LogWarning($"Fusion runner cleanup failed: {exception.Message}", this);
-                    }
+                    await failedRunner.Shutdown();
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogWarning($"Fusion runner cleanup failed: {exception.Message}", this);
                 }
             }
 
-            if (runnerObject != null)
-                Destroy(runnerObject);
+            if (failedRunner != null)
+                Destroy(failedRunner.gameObject);
         }
 
         private static bool IsLocalConnectionFailure(ShutdownReason reason)
@@ -332,13 +431,13 @@ namespace ChessRoyale.Networking
                 case ShutdownReason.GameIsFull:
                     return $"Room '{roomCode}' already has {ChessNetworkTypes.MaxPlayers} players. A third player cannot join.";
                 case ShutdownReason.GameNotFound:
-                    return $"No Fusion room named '{roomCode}' was found.";
+                    return $"No room named '{roomCode}' was found.";
                 case ShutdownReason.GameIdAlreadyExists:
-                    return $"Fusion room '{roomCode}' already exists. Join it instead of creating it.";
+                    return $"Room '{roomCode}' already exists. Join it instead of creating it.";
                 case ShutdownReason.InvalidAuthentication:
-                    return "Photon rejected the Chess Royale Fusion App ID. Check Photon App Settings and use the same App ID in both builds.";
+                    return "Photon rejected this build's App ID. Both headsets need the same App ID.";
                 default:
-                    return $"Could not {action} Fusion Shared Mode room '{roomCode}': {reason}.";
+                    return $"Could not {action} room '{roomCode}': {reason}.";
             }
         }
 
@@ -349,13 +448,13 @@ namespace ChessRoyale.Networking
 
             if (runner != null)
             {
-                runner.RemoveCallbacks(this);
+                Unhook(runner);
                 if (runner.IsRunning)
                     _ = runner.Shutdown();
             }
         }
 
-        public void OnPlayerJoined(NetworkRunner callbackRunner, PlayerRef player)
+        private void OnPlayerJoined(NetworkRunner callbackRunner, PlayerRef player)
         {
             if (callbackRunner != runner)
                 return;
@@ -369,107 +468,140 @@ namespace ChessRoyale.Networking
                 return;
             }
 
-            if (callbackRunner.IsSharedModeMasterClient)
-                ChessFusionLobbyState.Instance?.RefreshAssignments();
+            if (player != callbackRunner.LocalPlayer)
+                DisconnectNotice = null;
+
+            // Only the state authority actually changes seats; everyone else returns immediately.
+            ChessFusionLobbyState.Instance?.RefreshAssignments();
             if (player == callbackRunner.LocalPlayer)
                 SpawnLocalPlayer();
         }
 
-        public void OnPlayerLeft(NetworkRunner callbackRunner, PlayerRef player)
+        private void OnPlayerLeft(NetworkRunner callbackRunner, PlayerRef player)
         {
             if (callbackRunner != runner)
                 return;
 
             Debug.Log($"Fusion player {player} left room '{CurrentRoomCode}' ({PlayerCount}/{MaximumPlayers}).", this);
-            if (player != callbackRunner.LocalPlayer)
-                RecordOpponentDisconnect(callbackRunner, player);
-            if (callbackRunner.IsSharedModeMasterClient)
-                ChessFusionLobbyState.Instance?.RefreshAssignments();
-        }
-
-        private void RecordOpponentDisconnect(NetworkRunner callbackRunner, PlayerRef player)
-        {
-            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
-            ChessRoyale.ChessGameController game = ChessRoyale.ChessGameController.Instance;
-            ChessNetworkGameState state = ChessNetworkGameState.Instance;
-            bool gameUnderway = lobby != null
-                && lobby.MatchReady
-                && game != null
-                && game.Outcome == ChessRoyale.ChessGameOutcome.InProgress
-                && state != null
-                && state.MoveSequence > 1;
-
-            if (gameUnderway && callbackRunner.IsSharedModeMasterClient)
-            {
-                ChessRoyale.ChessPieceColor disconnected = player == lobby.WhitePlayer
-                    ? ChessRoyale.ChessPieceColor.White
-                    : ChessRoyale.ChessPieceColor.Black;
-                state.PublishDisconnect(disconnected);
-                DisconnectNotice = game.StatusMessage;
+            if (player == callbackRunner.LocalPlayer)
                 return;
-            }
 
-            DisconnectNotice = "The other player disconnected.";
+            ChessFusionLobbyState.Instance?.RefreshAssignments();
+            ChessRoyale.ChessGameController game = ChessRoyale.ChessGameController.Instance;
+            bool gameUnderway = game != null
+                && game.Outcome == ChessRoyale.ChessGameOutcome.InProgress
+                && ChessNetworkGameState.Instance != null
+                && ChessNetworkGameState.Instance.MoveSequence > 1;
+            DisconnectNotice = gameUnderway
+                ? $"The other player dropped. Holding their seat for {ChessNetworkGameState.ReconnectWindowSeconds:0} seconds."
+                : "The other player disconnected.";
         }
 
-        public void OnShutdown(NetworkRunner callbackRunner, ShutdownReason shutdownReason)
+        private void OnRunnerShutdown(NetworkRunner callbackRunner, ShutdownReason shutdownReason)
         {
             if (callbackRunner != runner)
                 return;
 
-            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
             ChessRoyale.ChessGameController game = ChessRoyale.ChessGameController.Instance;
-            ChessSeat seat = lobby != null ? lobby.LocalSeat : ChessSeat.None;
-            bool gameUnderway = lobby != null
-                && lobby.MatchReady
-                && game != null
-                && game.Outcome == ChessRoyale.ChessGameOutcome.InProgress
-                && ChessNetworkGameState.Instance != null
-                && ChessNetworkGameState.Instance.MoveSequence > 1;
+            bool gameInProgress = game != null && game.Outcome == ChessRoyale.ChessGameOutcome.InProgress;
+            bool wasInMatch = wasInReadyMatch;
+            string roomCode = CurrentRoomCode;
 
             runner = null;
             localPlayer = null;
             spawnWhenSeated = false;
-            string roomCode = CurrentRoomCode;
+            wasInReadyMatch = false;
             CurrentRoomCode = null;
-            RestoreSceneRigs();
-            SyncNetworkPlay();
-            if (!leavingIntentionally && IsLocalConnectionFailure(shutdownReason))
+            ForgetVoice();
+
+            if (string.IsNullOrEmpty(roomCode))
             {
-                DisconnectNotice = "Your connection to the room failed.";
-                LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
-                Debug.LogWarning(LastError, this);
-            }
-            else if (!leavingIntentionally && gameUnderway)
-            {
-                ChessRoyale.ChessPieceColor disconnected = seat == ChessSeat.Black
-                    ? ChessRoyale.ChessPieceColor.White
-                    : ChessRoyale.ChessPieceColor.Black;
-                game.EndByDisconnect(disconnected);
-                DisconnectNotice = game.StatusMessage + " The room is closed.";
-            }
-            else if (!leavingIntentionally && shutdownReason != ShutdownReason.Ok)
-            {
-                DisconnectNotice = "The room closed because the other player disconnected.";
-                LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
-                Debug.LogWarning(LastError, this);
+                // A Create/Join attempt that never finished connecting. StartRoom reports that failure
+                // itself; don't show a "room closed" notice or move the rig (this also covers retries).
+                SyncNetworkPlay();
+                if (callbackRunner != null)
+                    Destroy(callbackRunner.gameObject);
+                return;
             }
 
+            if (!leavingIntentionally && IsLocalConnectionFailure(shutdownReason) && wasInMatch && gameInProgress && !string.IsNullOrEmpty(roomCode))
+            {
+                // Our own connection dropped mid-game. The room is still open on Photon's side and the
+                // other player is holding our seat, so try to get back in with the same code.
+                Debug.LogWarning($"Lost connection to room '{roomCode}' ({shutdownReason}). Trying to rejoin.", this);
+                BeginReconnect(roomCode);
+            }
+            else
+            {
+                RestoreRigPose();
+                if (!leavingIntentionally && IsLocalConnectionFailure(shutdownReason))
+                {
+                    DisconnectNotice = "Your connection to the room failed.";
+                    LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
+                    Debug.LogWarning(LastError, this);
+                }
+                else if (!leavingIntentionally && wasInMatch && gameInProgress)
+                {
+                    DisconnectNotice = "The room closed during the game.";
+                    LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
+                    Debug.LogWarning(LastError, this);
+                }
+                else if (!leavingIntentionally && shutdownReason != ShutdownReason.Ok)
+                {
+                    DisconnectNotice = "The room closed because the other player disconnected.";
+                    LastError = $"Fusion room '{roomCode}' shut down: {shutdownReason}.";
+                    Debug.LogWarning(LastError, this);
+                }
+            }
+
+            SyncNetworkPlay();
             if (callbackRunner != null)
                 Destroy(callbackRunner.gameObject);
         }
 
-        public void OnConnectedToServer(NetworkRunner callbackRunner) { }
-        public void OnDisconnectedFromServer(NetworkRunner callbackRunner, NetDisconnectReason reason) { }
-        public void OnConnectRequest(NetworkRunner callbackRunner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
-        public void OnConnectFailed(NetworkRunner callbackRunner, NetAddress remoteAddress, NetConnectFailedReason reason) { }
-        public void OnSessionListUpdated(NetworkRunner callbackRunner, List<SessionInfo> sessionList) { }
-        public void OnCustomAuthenticationResponse(NetworkRunner callbackRunner, Dictionary<string, object> data) { }
-        public void OnHostMigration(NetworkRunner callbackRunner, HostMigrationToken hostMigrationToken) { }
-        public void OnReliableDataReceived(NetworkRunner callbackRunner, PlayerRef player, ReliableKey key, ReadOnlySpan<byte> data) { }
-        public void OnReliableDataProgress(NetworkRunner callbackRunner, PlayerRef player, ReliableKey key, float progress) { }
-        public void OnSceneLoadStart(NetworkRunner callbackRunner) { }
-        public void OnSceneLoadDone(NetworkRunner callbackRunner)
+        private async void BeginReconnect(string roomCode)
+        {
+            int generation = ++startGeneration;
+            IsReconnecting = true;
+            DisconnectNotice = null;
+            float giveUpAt = Time.realtimeSinceStartup + reconnectWindowSeconds;
+            int attempt = 0;
+
+            while (true)
+            {
+                attempt++;
+                ReconnectStatus = $"Connection lost. Rejoining room {roomCode} (try {attempt})...";
+                await Task.Delay(Mathf.CeilToInt(reconnectDelaySeconds * 1000f));
+                if (this == null || !IsReconnecting || generation != startGeneration)
+                    return;
+
+                bool rejoined = await StartRoom(roomCode, createRoom: false);
+                if (this == null || !IsReconnecting || generation != startGeneration)
+                    return;
+
+                if (rejoined)
+                {
+                    IsReconnecting = false;
+                    ReconnectStatus = null;
+                    DisconnectNotice = null;
+                    Debug.Log($"Rejoined room '{roomCode}' after attempt {attempt}.", this);
+                    return;
+                }
+
+                if (lastStartFailure == ShutdownReason.GameNotFound || Time.realtimeSinceStartup >= giveUpAt)
+                    break;
+            }
+
+            IsReconnecting = false;
+            ReconnectStatus = null;
+            DisconnectNotice = lastStartFailure == ShutdownReason.GameNotFound
+                ? "Could not rejoin: the room has closed."
+                : "Could not reconnect to the room.";
+            RestoreRigPose();
+            SyncNetworkPlay();
+        }
+
+        private void OnSceneLoadDone(NetworkRunner callbackRunner)
         {
             if (callbackRunner != runner || !IsConnected)
                 return;
@@ -478,18 +610,18 @@ namespace ChessRoyale.Networking
             SpawnLobbyState();
             SpawnLocalPlayer();
         }
-        public void OnObjectExitAOI(NetworkRunner callbackRunner, NetworkObject obj, PlayerRef player) { }
-        public void OnObjectEnterAOI(NetworkRunner callbackRunner, NetworkObject obj, PlayerRef player) { }
-        public void OnInput(NetworkRunner callbackRunner, NetworkInput input) { }
-        public void OnInputMissing(NetworkRunner callbackRunner, PlayerRef player, NetworkInput input) { }
 
+        // The master client creates the one shared game-state object. The spawn flag keeps it owned by
+        // whoever is master, matching the tutorial's lobby controller.
         private void SpawnLobbyState()
         {
             if (runner == null || !runner.IsRunning || !runner.IsSharedModeMasterClient || gameStatePrefab == null)
                 return;
+            if (runner.IsSceneManagerBusy)
+                return;
 
             if (ChessFusionLobbyState.Instance == null)
-                runner.Spawn(gameStatePrefab);
+                runner.Spawn(gameStatePrefab, flags: NetworkSpawnFlags.SharedModeStateAuthMasterClient);
 
             ChessFusionLobbyState.Instance?.RefreshAssignments();
         }
@@ -498,6 +630,11 @@ namespace ChessRoyale.Networking
         {
             if (runner == null || !runner.IsRunning || playerPrefab == null)
                 return;
+            if (runner.IsSceneManagerBusy)
+            {
+                spawnWhenSeated = true;
+                return;
+            }
             if (localPlayer != null && localPlayer.IsValid)
             {
                 spawnWhenSeated = false;
@@ -513,13 +650,54 @@ namespace ChessRoyale.Networking
             }
 
             spawnWhenSeated = false;
-            HideSceneRigs();
-            GetSpawnPose(seat == ChessSeat.White, out Vector3 position, out Quaternion rotation);
+            if (playerPrefab.GetComponentInChildren<XROrigin>(true) != null)
+            {
+                Debug.LogError("The network player prefab is still the old full XR rig. Run Tools/Chess Royale/Configure Photon Fusion to rebuild it as an avatar.", this);
+                return;
+            }
+
+            XROrigin origin = MoveRigToSeat(seat == ChessSeat.White);
+            Vector3 position = origin != null ? origin.transform.position : Vector3.zero;
+            Quaternion rotation = origin != null ? origin.transform.rotation : Quaternion.identity;
             localPlayer = runner.Spawn(playerPrefab, position, rotation, runner.LocalPlayer);
             if (localPlayer == null)
             {
-                Debug.LogError("Fusion did not spawn the Chess Royale player prefab. Run Tools/Chess Royale/Configure Photon Fusion.", this);
+                Debug.LogError("Fusion did not spawn the Chess Royale avatar. Run Tools/Chess Royale/Configure Photon Fusion.", this);
+                return;
             }
+
+            runner.SetPlayerObject(runner.LocalPlayer, localPlayer);
+        }
+
+        // Puts this headset's own rig at its side of the board. The rig is never networked itself;
+        // the avatar spawned next to it is what the other player sees.
+        private XROrigin MoveRigToSeat(bool white)
+        {
+            XROrigin origin = FindAnyObjectByType<XROrigin>();
+            if (origin == null)
+                return null;
+
+            if (!rigPoseSaved)
+            {
+                savedRigPosition = origin.transform.position;
+                savedRigRotation = origin.transform.rotation;
+                rigPoseSaved = true;
+            }
+
+            GetSpawnPose(white, out Vector3 position, out Quaternion rotation);
+            origin.transform.SetPositionAndRotation(position, rotation);
+            return origin;
+        }
+
+        private void RestoreRigPose()
+        {
+            if (!rigPoseSaved)
+                return;
+
+            rigPoseSaved = false;
+            XROrigin origin = FindAnyObjectByType<XROrigin>();
+            if (origin != null)
+                origin.transform.SetPositionAndRotation(savedRigPosition, savedRigRotation);
         }
 
         private void GetSpawnPose(bool white, out Vector3 position, out Quaternion rotation)
@@ -536,28 +714,79 @@ namespace ChessRoyale.Networking
             rotation = white ? Quaternion.identity : Quaternion.Euler(0f, 180f, 0f);
         }
 
-        private void HideSceneRigs()
+        // Voice chat, following the tutorial: the runner prefab carries a FusionVoiceClient and a
+        // Recorder. Voice joins its own room alongside the chess room, and the microphone only records
+        // once permission is granted and both connections are up. No Voice App ID means no voice.
+        private void SetUpVoice(NetworkRunner created)
         {
-            XROrigin[] origins = FindObjectsByType<XROrigin>(FindObjectsSortMode.None);
-            foreach (XROrigin origin in origins)
+            voiceClient = created.GetComponent<FusionVoiceClient>();
+            voiceRecorder = created.GetComponent<Recorder>();
+            if (voiceClient == null || voiceRecorder == null)
             {
-                if (origin.GetComponent<ChessFusionPlayer>() != null)
-                    continue;
-
-                hiddenRigs.Add(origin.gameObject);
-                origin.gameObject.SetActive(false);
+                voiceClient = null;
+                voiceRecorder = null;
+                return;
             }
+
+            voiceClient.PrimaryRecorder = voiceRecorder;
+            voiceClient.AutoConnectAndJoin = ChessFusionAppSettings.HasVoiceAppId();
+            voiceRecorder.SourceType = Recorder.InputSourceType.Microphone;
+            voiceRecorder.TransmitEnabled = true;
+            voiceRecorder.RecordWhenJoined = false;
+            voiceRecorder.RecordingEnabled = false;
         }
 
-        private void RestoreSceneRigs()
+        private void UpdateVoiceRecording()
         {
-            foreach (GameObject rig in hiddenRigs)
-            {
-                if (rig != null)
-                    rig.SetActive(true);
-            }
+            if (voiceClient == null || voiceRecorder == null)
+                return;
 
-            hiddenRigs.Clear();
+            bool shouldRecord = microphoneAllowed
+                && IsConnected
+                && voiceClient.AutoConnectAndJoin
+                && voiceClient.Client != null
+                && voiceClient.Client.InRoom;
+            if (voiceRecorder.RecordingEnabled != shouldRecord)
+                voiceRecorder.RecordingEnabled = shouldRecord;
+        }
+
+        private void ForgetVoice()
+        {
+            if (voiceRecorder != null)
+                voiceRecorder.RecordingEnabled = false;
+            voiceClient = null;
+            voiceRecorder = null;
+        }
+
+        private IEnumerator RequestMicrophonePermission()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            microphoneAllowed = UnityEngine.Android.Permission.HasUserAuthorizedPermission(UnityEngine.Android.Permission.Microphone);
+            if (!microphoneAllowed)
+            {
+                UnityEngine.Android.PermissionCallbacks callbacks = new UnityEngine.Android.PermissionCallbacks();
+                callbacks.PermissionGranted += permission => { if (this != null) microphoneAllowed = true; };
+                UnityEngine.Android.Permission.RequestUserPermission(UnityEngine.Android.Permission.Microphone, callbacks);
+            }
+            yield break;
+#elif UNITY_IOS || UNITY_VISIONOS || UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+            yield return Application.RequestUserAuthorization(UserAuthorization.Microphone);
+            microphoneAllowed = Application.HasUserAuthorization(UserAuthorization.Microphone);
+#else
+            microphoneAllowed = true;
+            yield break;
+#endif
+        }
+
+        private void OnApplicationFocus(bool focused)
+        {
+            if (!focused)
+                return;
+#if UNITY_ANDROID && !UNITY_EDITOR
+            microphoneAllowed = UnityEngine.Android.Permission.HasUserAuthorizedPermission(UnityEngine.Android.Permission.Microphone);
+#elif UNITY_IOS || UNITY_VISIONOS || UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+            microphoneAllowed = Application.HasUserAuthorization(UserAuthorization.Microphone);
+#endif
         }
 
         [ContextMenu("Fusion/Create Test Room")]

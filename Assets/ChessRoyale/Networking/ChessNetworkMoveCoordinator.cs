@@ -6,8 +6,15 @@ namespace ChessRoyale.Networking
     [DisallowMultipleComponent]
     public sealed class ChessNetworkMoveCoordinator : MonoBehaviour
     {
+        // If the room's authority never answers a request (for example it dropped mid-handoff),
+        // give the piece back instead of locking the board forever.
+        private const float RequestTimeoutSeconds = 4f;
+
         private byte nextRequestId = 1;
         private byte pendingRequestId;
+        private byte pendingPieceId;
+        private bool pendingPieceKnown;
+        private float requestSentAt;
         private bool requestInFlight;
         private bool listening;
 
@@ -40,6 +47,15 @@ namespace ChessRoyale.Networking
 
         private void Update()
         {
+            if (requestInFlight && Time.realtimeSinceStartup - requestSentAt > RequestTimeoutSeconds)
+            {
+                Debug.LogWarning("No answer to the last chess move request. Returning the piece.", this);
+                SetWaiting(false);
+                if (pendingPieceKnown)
+                    ChessGameController.Instance?.FindPiece(pendingPieceId)?.SnapBackToCurrentSquare();
+                pendingPieceKnown = false;
+            }
+
             if (listening || ChessGameController.Instance == null)
                 return;
 
@@ -66,6 +82,8 @@ namespace ChessRoyale.Networking
             }
 
             piece.PresentPredictedDrop(destination);
+            pendingPieceId = piece.PieceId;
+            pendingPieceKnown = true;
             pendingRequestId = nextRequestId++;
             if (nextRequestId == 0)
                 nextRequestId = 1;
@@ -92,6 +110,7 @@ namespace ChessRoyale.Networking
         public void OnAuthoritativeMoveApplied()
         {
             SetWaiting(false);
+            pendingPieceKnown = false;
         }
 
         private void SubmitPromotion(ChessPieceType type)
@@ -100,6 +119,7 @@ namespace ChessRoyale.Networking
             if (!IsOnline || game == null || !game.IsPromotionPending || requestInFlight)
                 return;
 
+            pendingPieceKnown = false;
             pendingRequestId = nextRequestId++;
             if (nextRequestId == 0)
                 nextRequestId = 1;
@@ -120,6 +140,8 @@ namespace ChessRoyale.Networking
         private void SetWaiting(bool waiting)
         {
             requestInFlight = waiting;
+            if (waiting)
+                requestSentAt = Time.realtimeSinceStartup;
             ChessGameController.Instance?.SetAwaitingAuthority(waiting);
         }
 
