@@ -199,7 +199,11 @@ namespace ChessRoyale
 
         private static bool ShouldShowClock()
         {
-            return MainMenu.LaunchMultiplayer && (InNetworkRoom || HostingRoom);
+            if (!MainMenu.LaunchMultiplayer || !(InNetworkRoom || HostingRoom))
+                return false;
+
+            ChessGameController match = ChessGameController.Instance;
+            return match == null || match.Outcome == ChessGameOutcome.InProgress;
         }
 
         private void LeaveSinglePlayer()
