@@ -16,8 +16,12 @@ namespace ChessRoyale.Networking
 
     [DisallowMultipleComponent]
     [RequireComponent(typeof(NetworkObject))]
-    public sealed class ChessNetworkGameState : NetworkBehaviour
+    public sealed class ChessNetworkGameState : NetworkBehaviour, IStateAuthorityChanged
     {
+        // How long a player who drops mid-game has to rejoin with the same room code before
+        // the other player is awarded the win.
+        public const float ReconnectWindowSeconds = 30f;
+
         [Networked] public PlayerRef WhitePlayer { get; set; }
         [Networked] public PlayerRef BlackPlayer { get; set; }
         [Networked] public NetworkBool MatchReady { get; set; }
@@ -32,6 +36,9 @@ namespace ChessRoyale.Networking
         [Networked] public int BlackTimeMs { get; set; }
         [Networked] public NetworkBool WhiteRematch { get; set; }
         [Networked] public NetworkBool BlackRematch { get; set; }
+        // Shared deadline in Fusion simulation time, like the tutorial's lobby countdown. Zero = no one is missing.
+        [Networked] public float ReconnectDeadline { get; set; }
+        [Networked] public int DroppedColor { get; set; }
         [Networked, Capacity(32)]
         public NetworkArray<NetworkPieceState> Pieces => default;
 
@@ -70,6 +77,16 @@ namespace ChessRoyale.Networking
 
         public static ChessNetworkGameState Instance { get; private set; }
 
+        public float ReconnectSecondsLeft
+        {
+            get
+            {
+                if (Object == null || !Object.IsValid || Runner == null || ReconnectDeadline <= 0f)
+                    return 0f;
+                return Mathf.Max(0f, ReconnectDeadline - Runner.SimulationTime);
+            }
+        }
+
         public override void Spawned()
         {
             Instance = this;
@@ -88,6 +105,43 @@ namespace ChessRoyale.Networking
                 Instance = null;
         }
 
+        // The new master after a handoff. Move-request numbering is per authority, so start fresh;
+        // the lobby state re-checks seats on its own handoff callback.
+        public void StateAuthorityChanged()
+        {
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority)
+                return;
+
+            lastWhiteRequestId = 0;
+            lastBlackRequestId = 0;
+        }
+
+        // Called by the lobby state whenever seats change. A seat emptying mid-game opens a window
+        // for that player to come back; both seats filling again closes it.
+        public void UpdateReconnectWindow(PlayerRef white, PlayerRef black, bool matchReady)
+        {
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority)
+                return;
+
+            if (matchReady)
+            {
+                ReconnectDeadline = 0f;
+                return;
+            }
+
+            if (ReconnectDeadline > 0f)
+                return;
+
+            ChessGameController game = ChessGameController.Instance;
+            bool gameUnderway = game != null && game.Outcome == ChessGameOutcome.InProgress && MoveSequence > 1;
+            if (!gameUnderway || (white == PlayerRef.None && black == PlayerRef.None))
+                return;
+
+            DroppedColor = (int)(white == PlayerRef.None ? ChessPieceColor.White : ChessPieceColor.Black);
+            ReconnectDeadline = Runner.SimulationTime + ReconnectWindowSeconds;
+            Debug.Log($"{(ChessPieceColor)DroppedColor} left mid-game. Holding the seat for {ReconnectWindowSeconds:0} seconds.", this);
+        }
+
         public override void FixedUpdateNetwork()
         {
             if (Object == null || !Object.IsValid || !Object.HasStateAuthority)
@@ -95,6 +149,13 @@ namespace ChessRoyale.Networking
 
             ChessGameController game = ChessGameController.Instance;
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            if (ReconnectDeadline > 0f && Runner.SimulationTime >= ReconnectDeadline)
+            {
+                ReconnectDeadline = 0f;
+                if (lobby == null || !lobby.MatchReady)
+                    PublishDisconnect((ChessPieceColor)DroppedColor);
+            }
+
             if (game == null || lobby == null || !lobby.MatchReady || game.Outcome != ChessGameOutcome.InProgress)
                 return;
             if (WhiteTimeMs <= 0 && BlackTimeMs <= 0)
@@ -146,10 +207,18 @@ namespace ChessRoyale.Networking
             if (Object == null || !Object.IsValid || !Object.HasStateAuthority)
                 return;
 
+            // A different player in a seat (e.g. someone rejoining from another headset) numbers their
+            // move requests from 1 again, so forget the previous occupant's last request number.
             if (previousWhite != white)
+            {
                 WhiteRematch = false;
+                lastWhiteRequestId = 0;
+            }
             if (previousBlack != black)
+            {
                 BlackRematch = false;
+                lastBlackRequestId = 0;
+            }
         }
 
         public void PublishInitialBoard()

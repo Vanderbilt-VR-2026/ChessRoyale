@@ -41,6 +41,7 @@ namespace ChessRoyale
         private Text statusText;
         private GameObject waitingRoot;
         private Text waitingCodeText;
+        private Text waitingLabelText;
         private GameObject matchLeaveRoot;
         private bool waitingShown;
 
@@ -124,6 +125,16 @@ namespace ChessRoyale
                     }
 
                     waitingCodeText.text = string.IsNullOrEmpty(code) ? "----" : code;
+                }
+
+                if (waitingLabelText != null)
+                {
+                    float hold = ChessFusionRoomManager.Instance != null && ChessFusionRoomManager.Instance.IsConnected && ChessNetworkGameState.Instance != null
+                        ? ChessNetworkGameState.Instance.ReconnectSecondsLeft
+                        : 0f;
+                    waitingLabelText.text = hold > 0f
+                        ? $"OPPONENT DROPPED - {Mathf.CeilToInt(hold)}s TO REJOIN ROOM"
+                        : "ROOM";
                 }
 
                 return;
@@ -358,7 +369,8 @@ namespace ChessRoyale
             root.offsetMin = Vector2.zero;
             root.offsetMax = Vector2.zero;
 
-            CreateText(root, "Room", new Vector2(0f, 78f), new Vector2(600f, 36f), 24, FontStyle.Bold).text = "ROOM";
+            waitingLabelText = CreateText(root, "Room", new Vector2(0f, 78f), new Vector2(600f, 36f), 24, FontStyle.Bold);
+            waitingLabelText.text = "ROOM";
             waitingCodeText = CreateText(root, "Code", new Vector2(0f, 18f), new Vector2(600f, 80f), 64, FontStyle.Bold);
             waitingCodeText.text = "----";
 

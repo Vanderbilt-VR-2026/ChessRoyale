@@ -24892,7 +24892,7 @@ GameObject:
   - component: {fileID: 775587361}
   - component: {fileID: 775587360}
   m_Layer: 0
-  m_Name: Chess Fusion Room
+  m_Name: Fusion Network Manager
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -24910,10 +24910,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1d1119730a3b5427c9117b848c4d0741, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ChessRoyale.Networking.ChessFusionRoomManager
-  playerPrefab: {fileID: 9005978477596241697, guid: 8541715ff87134f99b62832ba605b77b, type: 3}
+  runnerPrefab: {fileID: 3660090502801933884, guid: 432bccbcdb9f24b13a66eeb7a7aa4628, type: 3}
+  playerPrefab: {fileID: 2335088630950279536, guid: 8541715ff87134f99b62832ba605b77b, type: 3}
   gameStatePrefab: {fileID: 7141315677435637271, guid: dac86ed0230f54da0b5fadd05658a4e9, type: 3}
   whiteSpawn: {fileID: 1078756768}
   blackSpawn: {fileID: 1904945690}
+  reconnectDelaySeconds: 3
+  reconnectWindowSeconds: 25
 --- !u!4 &775587361
 Transform:
   m_ObjectHideFlags: 0

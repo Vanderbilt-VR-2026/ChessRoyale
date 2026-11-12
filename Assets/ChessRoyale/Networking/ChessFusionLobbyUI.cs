@@ -41,6 +41,7 @@ namespace ChessRoyale.Networking
 
         public string PendingRoomCode { get; private set; }
         private bool busy;
+        private bool showingReconnect;
         private string joinMessage = "Type a four-letter room code.";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -106,15 +107,9 @@ namespace ChessRoyale.Networking
             transform.rotation = Quaternion.LookRotation(faceDirection, Vector3.up);
         }
 
+        // The headset always uses its own scene rig now (online avatars are separate), so the main camera is it.
         private static Camera ResolveCamera()
         {
-            ChessFusionPlayer[] players = FindObjectsByType<ChessFusionPlayer>(FindObjectsSortMode.None);
-            foreach (ChessFusionPlayer player in players)
-            {
-                if (player.IsLocalPlayer && player.XrCamera != null && player.XrCamera.enabled)
-                    return player.XrCamera;
-            }
-
             if (Camera.main != null && Camera.main.enabled)
                 return Camera.main;
 
@@ -139,7 +134,24 @@ namespace ChessRoyale.Networking
             if (lobby != null && lobby.LocalSeat != ChessSeat.None)
                 resultSeat = lobby.LocalSeat;
 
-            if (ready && !ended)
+            if (connected)
+                showingReconnect = false;
+
+            if (room != null && room.IsReconnecting)
+            {
+                showingReconnect = true;
+                screen = LobbyScreen.Join;
+                joinMessage = room.ReconnectStatus;
+            }
+            else if (showingReconnect && !connected)
+            {
+                showingReconnect = false;
+                screen = LobbyScreen.Join;
+                joinMessage = string.IsNullOrEmpty(room?.DisconnectNotice)
+                    ? "Type a four-letter room code."
+                    : room.DisconnectNotice;
+            }
+            else if (ready && !ended)
                 screen = LobbyScreen.Playing;
             else if (ended && (screen == LobbyScreen.Playing || screen == LobbyScreen.Rematch || ready))
                 screen = LobbyScreen.Rematch;
