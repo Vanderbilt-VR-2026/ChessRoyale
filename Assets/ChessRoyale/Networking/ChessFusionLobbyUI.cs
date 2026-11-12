@@ -39,7 +39,11 @@ namespace ChessRoyale.Networking
 
         public bool IsWaitingForOpponent => screen == LobbyScreen.Create;
 
+        public bool IsOpeningRoom => busy && screen == LobbyScreen.Create;
+
         public string PendingRoomCode { get; private set; }
+
+        public string CreateNotice { get; private set; }
         private bool busy;
         private bool showingReconnect;
         private string joinMessage = "Type a four-letter room code.";
@@ -172,10 +176,8 @@ namespace ChessRoyale.Networking
         {
             if (createCodeText != null)
             {
-                string code = room != null && !string.IsNullOrEmpty(room.CurrentRoomCode)
-                    ? room.CurrentRoomCode
-                    : createCodeText.text;
-                createCodeText.text = string.IsNullOrEmpty(code) ? "----" : code;
+                bool open = room != null && room.IsConnected && !string.IsNullOrEmpty(room.CurrentRoomCode);
+                createCodeText.text = open ? room.CurrentRoomCode : "LOADING";
             }
 
             if (createStatusText == null)
@@ -265,9 +267,10 @@ namespace ChessRoyale.Networking
             int generation = ++flowGeneration;
             string code = ChessNetworkTypes.CreateRoomCode();
             PendingRoomCode = code;
+            CreateNotice = "LOADING";
             screen = LobbyScreen.Create;
             if (createCodeText != null)
-                createCodeText.text = code;
+                createCodeText.text = "LOADING";
             if (createStatusText != null)
                 createStatusText.text = "Creating the room...";
             ApplyScreen();
@@ -279,13 +282,25 @@ namespace ChessRoyale.Networking
             busy = false;
 
             if (screen == LobbyScreen.Playing || screen == LobbyScreen.Rematch)
+            {
+                CreateNotice = null;
                 return;
+            }
 
             screen = LobbyScreen.Create;
-            if (!created && createStatusText != null)
-                createStatusText.text = string.IsNullOrEmpty(room.LastError)
+            if (created)
+            {
+                CreateNotice = null;
+            }
+            else
+            {
+                CreateNotice = string.IsNullOrEmpty(room.LastError)
                     ? "Could not create the room."
                     : room.LastError;
+                if (createStatusText != null)
+                    createStatusText.text = CreateNotice;
+            }
+
             ApplyScreen();
         }
 
@@ -371,6 +386,7 @@ namespace ChessRoyale.Networking
             int generation = ++flowGeneration;
             busy = true;
             PendingRoomCode = null;
+            CreateNotice = null;
             ChessFusionRoomManager room = ChessFusionRoomManager.Instance;
             if (room != null)
                 await room.LeaveRoom();
