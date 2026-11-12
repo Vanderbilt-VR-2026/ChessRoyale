@@ -25,6 +25,7 @@ namespace ChessRoyale.Networking
         private Text joinStatusText;
         private Text resultTitleText;
         private Text rematchStatusText;
+        private Text colorChoiceText;
         private ChessSeat resultSeat = ChessSeat.None;
         private InputField codeInput;
         private Camera followedCamera;
@@ -33,6 +34,10 @@ namespace ChessRoyale.Networking
         private GameObject joinRoot;
         private GameObject createRoot;
         private GameObject rematchRoot;
+        private Button whiteChoiceButton;
+        private Button randomChoiceButton;
+        private Button blackChoiceButton;
+        private ChessSeatPreference creatorSeatPreference = ChessSeatPreference.Random;
         private LobbyScreen screen = LobbyScreen.Choose;
         private LobbyScreen shownScreen = (LobbyScreen)(-1);
         private int flowGeneration;
@@ -189,6 +194,8 @@ namespace ChessRoyale.Networking
                     createStatusText.text = room.DisconnectNotice;
                 else if (lobby != null && lobby.OpponentLeft && !lobby.MatchReady)
                     createStatusText.text = "The other player disconnected.";
+                else if (lobby != null && lobby.LocalSeat != ChessSeat.None)
+                    createStatusText.text = $"You are {ChessFusionLobbyState.SeatLabel(lobby.LocalSeat)}. Waiting for an opponent.";
                 else
                     createStatusText.text = "Waiting for an opponent.";
                 return;
@@ -275,7 +282,7 @@ namespace ChessRoyale.Networking
                 createStatusText.text = "Creating the room...";
             ApplyScreen();
 
-            bool created = await room.CreateRoom(code);
+            bool created = await room.CreateRoom(code, creatorSeatPreference);
             if (this == null || generation != flowGeneration)
                 return;
 
@@ -314,6 +321,46 @@ namespace ChessRoyale.Networking
             if (codeInput != null)
                 codeInput.text = string.Empty;
             ApplyScreen();
+        }
+
+        public void ChooseWhite()
+        {
+            SetCreatorSeatPreference(ChessSeatPreference.White);
+        }
+
+        public void ChooseRandom()
+        {
+            SetCreatorSeatPreference(ChessSeatPreference.Random);
+        }
+
+        public void ChooseBlack()
+        {
+            SetCreatorSeatPreference(ChessSeatPreference.Black);
+        }
+
+        private void SetCreatorSeatPreference(ChessSeatPreference preference)
+        {
+            if (busy)
+                return;
+
+            creatorSeatPreference = preference;
+            RefreshColorChoice();
+        }
+
+        private void RefreshColorChoice()
+        {
+            if (colorChoiceText != null)
+                colorChoiceText.text = $"Your color: {creatorSeatPreference.ToString().ToUpperInvariant()}";
+
+            SetChoiceButtonColor(whiteChoiceButton, creatorSeatPreference == ChessSeatPreference.White);
+            SetChoiceButtonColor(randomChoiceButton, creatorSeatPreference == ChessSeatPreference.Random);
+            SetChoiceButtonColor(blackChoiceButton, creatorSeatPreference == ChessSeatPreference.Black);
+        }
+
+        private static void SetChoiceButtonColor(Button button, bool selected)
+        {
+            if (button != null && button.image != null)
+                button.image.color = selected ? new Color(0.12f, 0.58f, 0.32f, 1f) : new Color(0.1f, 0.28f, 0.55f, 1f);
         }
 
         public async void SubmitJoin()
@@ -467,6 +514,7 @@ namespace ChessRoyale.Networking
         {
             bool showMenu = screen == LobbyScreen.Choose
                 || screen == LobbyScreen.Join
+                || screen == LobbyScreen.Create
                 || screen == LobbyScreen.Rematch;
             if (canvas != null)
                 canvas.enabled = showMenu;
@@ -503,11 +551,16 @@ namespace ChessRoyale.Networking
             background.color = new Color(0.02f, 0.03f, 0.06f, 0.94f);
 
             chooseRoot = CreatePage("Choose");
-            CreateText(chooseRoot.transform, "Chess Royale Online", new Vector2(0f, 180f), new Vector2(860f, 80f), 42);
-            CreateText(chooseRoot.transform, "Join a room or create one.", new Vector2(0f, 80f), new Vector2(860f, 60f), 28);
-            CreateButton(chooseRoot.transform, "CREATE", new Vector2(-160f, -40f), BeginCreate);
-            CreateButton(chooseRoot.transform, "JOIN", new Vector2(160f, -40f), ShowJoin);
-            CreateButton(chooseRoot.transform, "LEAVE", new Vector2(0f, -160f), LeaveLobbyToMenu);
+            CreateText(chooseRoot.transform, "Chess Royale Online", new Vector2(0f, 330f), new Vector2(860f, 80f), 42);
+            CreateText(chooseRoot.transform, "Room creator chooses their side.", new Vector2(0f, 245f), new Vector2(860f, 60f), 28);
+            colorChoiceText = CreateText(chooseRoot.transform, "Your color: RANDOM", new Vector2(0f, 155f), new Vector2(860f, 60f), 28);
+            whiteChoiceButton = CreateButton(chooseRoot.transform, "WHITE", new Vector2(-270f, 65f), ChooseWhite, new Vector2(220f, 72f));
+            randomChoiceButton = CreateButton(chooseRoot.transform, "RANDOM", new Vector2(0f, 65f), ChooseRandom, new Vector2(220f, 72f));
+            blackChoiceButton = CreateButton(chooseRoot.transform, "BLACK", new Vector2(270f, 65f), ChooseBlack, new Vector2(220f, 72f));
+            CreateButton(chooseRoot.transform, "CREATE", new Vector2(-160f, -75f), BeginCreate);
+            CreateButton(chooseRoot.transform, "JOIN", new Vector2(160f, -75f), ShowJoin);
+            CreateButton(chooseRoot.transform, "LEAVE", new Vector2(0f, -205f), LeaveLobbyToMenu);
+            RefreshColorChoice();
 
             createRoot = CreatePage("Create");
             CreateText(createRoot.transform, "Your room code", new Vector2(0f, 180f), new Vector2(860f, 70f), 36);
@@ -563,12 +616,12 @@ namespace ChessRoyale.Networking
             return text;
         }
 
-        private void CreateButton(Transform parent, string label, Vector2 position, UnityEngine.Events.UnityAction action)
+        private Button CreateButton(Transform parent, string label, Vector2 position, UnityEngine.Events.UnityAction action)
         {
-            CreateButton(parent, label, position, action, new Vector2(240f, 72f));
+            return CreateButton(parent, label, position, action, new Vector2(240f, 72f));
         }
 
-        private void CreateButton(Transform parent, string label, Vector2 position, UnityEngine.Events.UnityAction action, Vector2 size)
+        private Button CreateButton(Transform parent, string label, Vector2 position, UnityEngine.Events.UnityAction action, Vector2 size)
         {
             GameObject buttonObject = new GameObject(label, typeof(RectTransform));
             buttonObject.transform.SetParent(parent, false);
@@ -582,6 +635,7 @@ namespace ChessRoyale.Networking
             Text text = CreateText(buttonObject.transform, label, Vector2.zero, size, 28);
             text.rectTransform.anchoredPosition = Vector2.zero;
             text.rectTransform.sizeDelta = size;
+            return button;
         }
 
         private InputField CreateCodeInput(Transform parent, Vector2 position)
