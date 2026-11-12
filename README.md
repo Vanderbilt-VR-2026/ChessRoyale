@@ -46,6 +46,27 @@ The game includes:
 
 The project includes the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity`, with board teleportation and networked play. Background music and sound effects are included (see [Audio](#audio)).
 
+## Single player: playing the computer
+
+Choosing **Single Player** opens a setup panel in front of you:
+
+- **Play as:** White, Black, or Random. Playing Black turns you to face the board from Black's side, and the computer moves first.
+- **Difficulty:**
+
+| Level | How it plays |
+|---|---|
+| **Easy** | Looks one move ahead without checking replies, picks among "good enough" moves, and sometimes plays a random one. Grabs free pieces, walks into recaptures. |
+| **Medium** | Looks three moves ahead and plays out captures to the end. Spots forks and punishes blunders. |
+| **Expert** | Keeps looking deeper (iterative deepening) for about two seconds per move, typically 5 to 8 moves ahead. Plays solid, tactical chess. |
+
+The panel returns after each game with the result, so you can rematch or change level. The setup is remembered between sessions.
+
+**How it works.** `ChessEngine` (`Assets/ChessRoyale/Scripts/AI/`) is a classic alpha-beta chess engine in plain C#: it generates moves, searches ahead while pruning lines that can't beat the best found so far, settles captures before judging a position (quiescence search), and scores positions by material plus piece placement (piece-square tables). `ChessAIPlayer` gives it a copy of the board and runs it on a background thread, so the headset never stutters while it thinks, then plays its move through the same rules code as a human move. The search allocates no memory per position, which avoids garbage-collector pauses on Quest.
+
+**Tested outside Unity.** The move generator matches the published *perft* counts (every legal move sequence to a fixed depth) for six standard test positions, about 6.9 million positions in total, covering castling, en passant and promotion. Search tests confirm it finds checkmates, wins free material, avoids a poisoned pawn, and promotes. In engine-vs-engine games, Medium beat Easy 10-0, and Expert beat Medium 3-0 with 1 draw.
+
+Claude was used to help write the chess engine, the AI player and setup panel, and their tests; the team reviewed and play-tested it on Meta Quest 3.
+
 ## VR controls
 
 | Action | Input |

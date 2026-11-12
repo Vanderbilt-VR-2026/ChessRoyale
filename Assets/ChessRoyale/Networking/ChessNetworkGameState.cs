@@ -235,6 +235,7 @@ namespace ChessRoyale.Networking
             game.ResetGame();
             CopySeatsFromLobby();
             WriteSnapshot(game);
+            RPC_RepositionPlayers();
         }
 
         public void RestartMatch()
@@ -251,6 +252,7 @@ namespace ChessRoyale.Networking
             game.ResetGame();
             CopySeatsFromLobby();
             WriteSnapshot(game);
+            RPC_RepositionPlayers();
         }
 
         public void PublishDisconnect(ChessPieceColor disconnected)
@@ -415,6 +417,12 @@ namespace ChessRoyale.Networking
 
             Debug.Log($"Chess move rejected: {reason}", this);
             ChessNetworkMoveCoordinator.Instance?.OnMoveRejected(requestId, pieceId);
+        }
+
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        private void RPC_RepositionPlayers()
+        {
+            ChessFusionRoomManager.Instance?.RepositionLocalRigForAssignedSeat();
         }
 
         private bool TryValidateRematch(PlayerRef sender, out ChessPieceColor seat, out string error)

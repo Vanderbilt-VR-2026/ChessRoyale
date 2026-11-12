@@ -320,8 +320,8 @@ namespace ChessRoyale
             return !string.IsNullOrEmpty(status) && status.EndsWith("check");
         }
 
-        // Online, the result depends on which seat this headset holds. In single player you move
-        // both sides, so any decisive result plays the victory sound.
+        // The result depends on which side this player is on: their seat online, or the side they
+        // picked against the computer in single player.
         private static ChessSfx ResultSound(ChessGameOutcome outcome)
         {
             ChessPieceColor? winner = null;
@@ -341,6 +341,10 @@ namespace ChessRoyale
 
             if (winner == null)
                 return ChessSfx.Draw;
+
+            // Single player against the computer: a win or a loss depends on the side the player chose.
+            if (!MainMenu.LaunchMultiplayer)
+                return winner == ChessSinglePlayerSettings.HumanColor ? ChessSfx.Victory : ChessSfx.Defeat;
 
             ChessSeat seat = LocalSeat();
             if (seat == ChessSeat.None)

@@ -10,6 +10,13 @@ namespace ChessRoyale.Networking
         Black,
     }
 
+    public enum ChessSeatPreference
+    {
+        Random,
+        White,
+        Black,
+    }
+
     // Seats and match readiness for one room. Lives on the shared game-state prefab, which is a
     // master client object: if the room creator leaves, the remaining player takes it over instead of
     // the room losing its state (the tutorial's lobby controller uses the same setup).
@@ -21,6 +28,8 @@ namespace ChessRoyale.Networking
         [Networked] public PlayerRef BlackPlayer { get; set; }
         [Networked] public NetworkBool MatchReady { get; set; }
         [Networked] public NetworkBool OpponentLeft { get; set; }
+        [Networked] public PlayerRef CreatorPlayer { get; set; }
+        [Networked] public int CreatorSeatPreference { get; set; }
 
         public static ChessFusionLobbyState Instance { get; private set; }
 
@@ -66,6 +75,15 @@ namespace ChessRoyale.Networking
 
             PlayerRef white = IsActive(WhitePlayer) ? WhitePlayer : PlayerRef.None;
             PlayerRef black = IsActive(BlackPlayer) ? BlackPlayer : PlayerRef.None;
+
+            if (white == PlayerRef.None && black == PlayerRef.None && IsActive(CreatorPlayer))
+            {
+                if ((ChessSeatPreference)CreatorSeatPreference == ChessSeatPreference.Black)
+                    black = CreatorPlayer;
+                else
+                    white = CreatorPlayer;
+            }
+
             foreach (PlayerRef player in Runner.ActivePlayers)
             {
                 if (player == white || player == black)
@@ -94,6 +112,23 @@ namespace ChessRoyale.Networking
             state?.UpdateReconnectWindow(white, black, ready);
             if (becameReady && state != null && state.MoveSequence == 0)
                 state.PublishInitialBoard();
+        }
+
+        public void ConfigureCreator(PlayerRef creator, ChessSeatPreference preference)
+        {
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority || MatchReady)
+                return;
+
+            if (preference == ChessSeatPreference.Random)
+                preference = Random.value < 0.5f ? ChessSeatPreference.White : ChessSeatPreference.Black;
+
+            CreatorPlayer = creator;
+            CreatorSeatPreference = (int)preference;
+            if (WhitePlayer == creator)
+                WhitePlayer = PlayerRef.None;
+            if (BlackPlayer == creator)
+                BlackPlayer = PlayerRef.None;
+            RefreshAssignments();
         }
 
         private bool IsActive(PlayerRef player)
