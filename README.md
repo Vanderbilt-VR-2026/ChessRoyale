@@ -149,6 +149,18 @@ The separately licensed Asset Store source folders and generated Unity/build dir
 | Sarina Liu | Added Background and Timer. Adjusted the lighting. Recorded the demo. |
 | Feiyuan Yang | Added VR teleportation limited to the board so players can move around without falling off; rebuilt the VR main menu (START/QUIT) with controller-ray interaction on the new board and set it as the first build scene; merged the main menu and teleportation onto the complete-rules stack; tested teleport boundaries and the main menu on Meta Quest 3. |
 
+# Sprint 3 Demo
+[Download the Sprint 3 Quest build (APK)](https://github.com/Vanderbilt-VR-2026/ChessRoyale/releases/tag/sprint-3-apk)
+
+## Sprint 3 contribution log
+
+| Team member | Work completed this sprint |
+|---|---|
+| RuoHan Chen | Built Photon Fusion shared-mode multiplayer: a four-letter room lobby with an in-headset letter keyboard, networked VR players, legal moves synced through the shared authority, a shared chess clock, rematch voting, and disconnect handling; separated single-player chess from the multiplayer room flow; merged the Sprint 2 stack into main and prepared the Sprint 3 Quest build. |
+| Derrick Seo | Added looping background music and the `ChessAudio` sound-effect system (grabs, moves, captures, check, promotion, and game results); wrote the product-sense section of the README. |
+| Sarina Liu | Designed the start screen with One/Two Player mode and time control; wrote the Sprint 3 design section of the README; merged the Sprint 2 hall environment, lighting, and chess timer into main; worked on the hand/controller models (PR #62). |
+| Feiyuan Yang | Designed the hand/controller models; merged teleportation and the VR main menu into main; organized the Kanban board into Sprint 3 epics. |
+
 ## Product sense: deliberate design vs. AI default
 
 AI tools tend to produce the "complete, generic" version of a feature: every rule implemented, every state shown as text, every flow covered. This section separates the features that exist because they make Chess Royale a better VR game from the ones that are there mainly because that is what an AI-assisted build produces by default, and says what to do about each.
