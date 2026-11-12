@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text;
+using ChessRoyale.AI;
 using UnityEngine;
 
 namespace ChessRoyale
@@ -64,8 +65,8 @@ namespace ChessRoyale
         private bool networkHasSeat;
         private bool networkAwaitingAuthority;
         private ChessPieceColor networkSeatColor;
-        private float aiThinkTime;
         private bool executingAiMove;
+        private ChessPieceType aiPromotionType = ChessPieceType.Queen;
 
         private static bool IsSinglePlayer => !MainMenu.LaunchMultiplayer;
 
@@ -94,60 +95,16 @@ namespace ChessRoyale
 
             if (promotionPanel != null)
                 promotionPanel.SetActive(false);
+
+            // Single player: the computer opponent (ChessAIPlayer) lives next to the rules.
+            if (IsSinglePlayer && GetComponent<ChessAIPlayer>() == null)
+                gameObject.AddComponent<ChessAIPlayer>();
         }
 
         private void OnDestroy()
         {
             if (Instance == this)
                 Instance = null;
-        }
-
-        private void OnDisable()
-        {
-            aiThinkTime = 0f;
-        }
-
-        private void Update()
-        {
-            if (!IsSinglePlayer || activeColor != ChessPieceColor.Black ||
-                outcome != ChessGameOutcome.InProgress || pendingPromotionPiece != null)
-            {
-                aiThinkTime = 0f;
-                return;
-            }
-
-            aiThinkTime += Time.deltaTime;
-            if (aiThinkTime < 1f)
-                return;
-
-            aiThinkTime = 0f;
-            var moves = new List<KeyValuePair<ChessPieceInteractable, ChessBoardSquare>>();
-            foreach (ChessPieceInteractable piece in pieces)
-            {
-                if (piece.IsCaptured || piece.PieceColor != ChessPieceColor.Black)
-                    continue;
-
-                foreach (ChessBoardSquare destination in GetLegalMoves(piece))
-                    moves.Add(new KeyValuePair<ChessPieceInteractable, ChessBoardSquare>(piece, destination));
-            }
-
-            if (moves.Count == 0)
-            {
-                EvaluateGameState();
-                RefreshTurnInteraction();
-                return;
-            }
-
-            var move = moves[Random.Range(0, moves.Count)];
-            executingAiMove = true;
-            try
-            {
-                TryMove(move.Key, move.Value);
-            }
-            finally
-            {
-                executingAiMove = false;
-            }
         }
 
         public void ConfigurePromotionPanel(GameObject panel)
@@ -248,8 +205,8 @@ namespace ChessRoyale
         public bool TryMove(ChessPieceInteractable piece, ChessBoardSquare destination)
         {
             ClearMoveHints();
-            // Keep the shared network authority path unchanged; only local black moves belong to the AI.
-            if (IsSinglePlayer && piece != null && piece.PieceColor == ChessPieceColor.Black && !executingAiMove)
+            // In single player, only the computer (through TryPlayEngineMove) may move the computer's pieces.
+            if (IsSinglePlayer && piece != null && piece.PieceColor != ChessSinglePlayerSettings.HumanColor && !executingAiMove)
                 return false;
             if (outcome != ChessGameOutcome.InProgress || pendingPromotionPiece != null ||
                 piece == null || piece.IsCaptured || destination == null || piece.PieceColor != activeColor)
@@ -281,9 +238,9 @@ namespace ChessRoyale
             {
                 pendingPromotionPiece = piece;
                 pendingMoveWasCapture = capturedPiece != null;
-                if (IsSinglePlayer && piece.PieceColor == ChessPieceColor.Black)
+                if (executingAiMove)
                 {
-                    CompletePromotion(ChessPieceType.Queen);
+                    CompletePromotion(aiPromotionType);
                     return true;
                 }
                 ShowPromotionPanel();
@@ -298,6 +255,88 @@ namespace ChessRoyale
         public void FinishMovePresentation()
         {
             RefreshTurnInteraction();
+        }
+
+        // Single player: re-check which pieces the player may grab (after Start, or when the setup panel returns).
+        public void RefreshLocalControls()
+        {
+            RefreshTurnInteraction();
+        }
+
+        // Middle of the board in world space; the AI player turns the rig around it when you play Black.
+        public Vector3 BoardCenter
+        {
+            get
+            {
+                if (squares.Count == 0)
+                    return transform.position;
+
+                Vector3 sum = Vector3.zero;
+                foreach (ChessBoardSquare square in squares.Values)
+                    sum += square.transform.position;
+                return sum / squares.Count;
+            }
+        }
+
+        // A plain-data copy of the game for ChessEngine, which can't touch Unity objects from its thread.
+        public EnginePosition ExportEnginePosition()
+        {
+            EnginePosition position = new EnginePosition();
+            foreach (KeyValuePair<ChessBoardSquare, ChessPieceInteractable> entry in board)
+            {
+                ChessPieceInteractable piece = entry.Value;
+                if (piece == null || piece.IsCaptured)
+                    continue;
+
+                int type = (int)piece.PieceType + 1;
+                position.Board[entry.Key.RankIndex * 8 + entry.Key.FileIndex] = piece.PieceColor == ChessPieceColor.White ? type : -type;
+            }
+
+            position.SideToMove = activeColor == ChessPieceColor.White ? 1 : -1;
+            position.Castling = 0;
+            if (HasCastlingRight(ChessPieceColor.White, 0, 7)) position.Castling |= EnginePosition.WhiteKingside;
+            if (HasCastlingRight(ChessPieceColor.White, 0, 0)) position.Castling |= EnginePosition.WhiteQueenside;
+            if (HasCastlingRight(ChessPieceColor.Black, 7, 7)) position.Castling |= EnginePosition.BlackKingside;
+            if (HasCastlingRight(ChessPieceColor.Black, 7, 0)) position.Castling |= EnginePosition.BlackQueenside;
+            position.EnPassant = enPassantTargetSquare != null && enPassantVulnerablePawn != null
+                ? enPassantTargetSquare.RankIndex * 8 + enPassantTargetSquare.FileIndex
+                : -1;
+            position.Halfmove = halfmoveClock;
+            return position;
+        }
+
+        // Plays the computer's move through the normal rules path (animation, captures, sounds, results).
+        public bool TryPlayEngineMove(EngineMove move)
+        {
+            ChessBoardSquare from = GetSquare(move.From % 8, move.From / 8);
+            ChessBoardSquare to = GetSquare(move.To % 8, move.To / 8);
+            if (from == null || to == null || !board.TryGetValue(from, out ChessPieceInteractable piece))
+                return false;
+
+            aiPromotionType = move.Promotion >= EnginePosition.Knight && move.Promotion <= EnginePosition.Queen
+                ? (ChessPieceType)(move.Promotion - 1)
+                : ChessPieceType.Queen;
+            executingAiMove = true;
+            try
+            {
+                return TryMove(piece, to);
+            }
+            finally
+            {
+                executingAiMove = false;
+                RefreshTurnInteraction();
+            }
+        }
+
+        private bool HasCastlingRight(ChessPieceColor color, int rank, int rookFile)
+        {
+            ChessBoardSquare kingSquare = GetSquare(4, rank);
+            ChessBoardSquare rookSquare = GetSquare(rookFile, rank);
+            return kingSquare != null && rookSquare != null &&
+                   board.TryGetValue(kingSquare, out ChessPieceInteractable king) &&
+                   board.TryGetValue(rookSquare, out ChessPieceInteractable rook) &&
+                   king.PieceColor == color && king.PieceType == ChessPieceType.King && !king.HasMoved &&
+                   rook.PieceColor == color && rook.PieceType == ChessPieceType.Rook && !rook.HasMoved;
         }
 
         public void PromoteToQueen() => SubmitPromotion(ChessPieceType.Queen);
@@ -415,7 +454,6 @@ namespace ChessRoyale
 
         public void ResetGame()
         {
-            aiThinkTime = 0f;
             ClearMoveHints();
             ClearCheckSignal();
             board.Clear();
@@ -786,7 +824,6 @@ namespace ChessRoyale
 
         private void CompleteTurn(ChessPieceInteractable movedPiece, bool pawnMove, bool wasCapture)
         {
-            aiThinkTime = 0f;
             halfmoveClock = pawnMove || wasCapture ? 0 : halfmoveClock + 1;
             activeColor = Opposite(activeColor);
             RecordCurrentPosition();
@@ -932,7 +969,7 @@ namespace ChessRoyale
             if (piece == null || piece.IsCaptured || piece.PieceColor != activeColor)
                 return false;
             if (IsSinglePlayer)
-                return piece.PieceColor == ChessPieceColor.White;
+                return ChessSinglePlayerSettings.GameStarted && piece.PieceColor == ChessSinglePlayerSettings.HumanColor;
             if (!networkSessionActive)
                 return true;
 
