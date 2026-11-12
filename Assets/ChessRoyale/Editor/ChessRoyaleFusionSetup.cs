@@ -15,7 +15,7 @@ using UnityEngine.SceneManagement;
 namespace ChessRoyale.Editor
 {
     // Builds everything online play needs, following the class Fusion + XRI tutorial:
-    // - ChessNetworkPlayer.prefab: a lightweight avatar (head, hands, body) with explicit pose replication.
+    // - ChessNetworkPlayer.prefab: a lightweight tracked monkey avatar with explicit pose replication.
     // - ChessNetworkGameState.prefab: the shared seats/board/clock object, as a master client object.
     // - FusionNetworkRunner.prefab: NetworkRunner + NetworkEvents + scene manager + Photon Voice.
     // - The "Fusion Network Manager" object in ChessRoyaleVR, with all of the above assigned.
