@@ -294,13 +294,16 @@ namespace ChessRoyale.Networking
                 return;
             }
 
-            screen = LobbyScreen.Create;
             if (created)
             {
                 CreateNotice = null;
+                // The chess clock owns the single waiting-room display once the room is open.
+                // Hide this transient creation popup so the room code is not shown twice.
+                screen = LobbyScreen.Playing;
             }
             else
             {
+                screen = LobbyScreen.Create;
                 CreateNotice = string.IsNullOrEmpty(room.LastError)
                     ? "Could not create the room."
                     : room.LastError;
