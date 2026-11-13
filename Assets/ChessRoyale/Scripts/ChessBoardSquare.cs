@@ -19,6 +19,14 @@ namespace ChessRoyale
         private Renderer ringRenderer;
         private MaterialPropertyBlock materialProperties;
         private bool moveHintActive;
+        private GameObject lastMoveFrame;
+        private Mesh lastMoveMesh;
+        private Renderer lastMoveRenderer;
+        private MaterialPropertyBlock lastMoveProperties;
+
+        // Opponent's last move: blue frames, bright on the destination, dim on the origin.
+        private static readonly Color LastMoveDestinationColor = new Color(0.25f, 0.62f, 1f, 1f);
+        private static readonly Color LastMoveOriginColor = new Color(0.12f, 0.32f, 0.6f, 1f);
 
         public string Coordinate => coordinate;
         public int FileIndex => fileIndex;
@@ -40,12 +48,15 @@ namespace ChessRoyale
         {
             ActiveSquares.Remove(this);
             ClearMoveHint();
+            ClearLastMoveHint();
         }
 
         private void OnDestroy()
         {
             if (ringMesh != null)
                 Destroy(ringMesh);
+            if (lastMoveMesh != null)
+                Destroy(lastMoveMesh);
         }
 
         public void Initialize(int file, int rank, GameObject boundary = null)
@@ -123,6 +134,71 @@ namespace ChessRoyale
         {
             // Check remains in the game status; no red board indicators.
             RefreshHintVisual();
+        }
+
+        public void SetLastMoveHint(bool isDestination)
+        {
+            EnsureLastMoveFrame();
+            Color color = isDestination ? LastMoveDestinationColor : LastMoveOriginColor;
+            lastMoveProperties.SetColor("_BaseColor", color);
+            lastMoveProperties.SetColor("_Color", color);
+            lastMoveProperties.SetColor("_EmissionColor", color * (isDestination ? 1.4f : 0.6f));
+            lastMoveRenderer.SetPropertyBlock(lastMoveProperties);
+            lastMoveFrame.SetActive(true);
+        }
+
+        public void ClearLastMoveHint()
+        {
+            if (lastMoveFrame != null)
+                lastMoveFrame.SetActive(false);
+        }
+
+        // A thin square frame just inside the square's edge, so it never overlaps the gold legal-move ring.
+        private void EnsureLastMoveFrame()
+        {
+            if (lastMoveFrame != null)
+                return;
+
+            BoxCollider squareCollider = GetComponent<BoxCollider>();
+            Vector3 center = squareCollider.center;
+            float outer = Mathf.Min(squareCollider.size.x, squareCollider.size.z) * 0.47f;
+            float inner = outer * 0.84f;
+            float height = center.y + squareCollider.size.y * 0.5f
+                + 0.002f / Mathf.Max(Mathf.Abs(transform.lossyScale.y), 0.0001f);
+            Vector2[] corners = { new Vector2(1f, 1f), new Vector2(-1f, 1f), new Vector2(-1f, -1f), new Vector2(1f, -1f) };
+            var vertices = new Vector3[8];
+            var normals = new Vector3[8];
+            var triangles = new int[24];
+            for (int i = 0; i < 4; i++)
+            {
+                vertices[i * 2] = new Vector3(center.x + corners[i].x * outer, height, center.z + corners[i].y * outer);
+                vertices[i * 2 + 1] = new Vector3(center.x + corners[i].x * inner, height, center.z + corners[i].y * inner);
+                normals[i * 2] = normals[i * 2 + 1] = Vector3.up;
+                int next = ((i + 1) % 4) * 2;
+                int offset = i * 6;
+                triangles[offset] = i * 2;
+                triangles[offset + 1] = i * 2 + 1;
+                triangles[offset + 2] = next;
+                triangles[offset + 3] = next;
+                triangles[offset + 4] = i * 2 + 1;
+                triangles[offset + 5] = next + 1;
+            }
+
+            lastMoveMesh = new Mesh { name = "Last Move Frame", vertices = vertices, normals = normals, triangles = triangles };
+            lastMoveMesh.RecalculateBounds();
+            lastMoveMesh.UploadMeshData(true);
+            lastMoveFrame = new GameObject("Opponent Last Move Frame");
+            lastMoveFrame.transform.SetParent(transform, false);
+            lastMoveFrame.AddComponent<MeshFilter>().sharedMesh = lastMoveMesh;
+            lastMoveRenderer = lastMoveFrame.AddComponent<MeshRenderer>();
+            Renderer source = hintBoundary != null ? hintBoundary.GetComponentInChildren<Renderer>(true) : null;
+            lastMoveRenderer.sharedMaterial = source != null ? source.sharedMaterial : GetComponent<Renderer>().sharedMaterial;
+            lastMoveRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            lastMoveRenderer.receiveShadows = false;
+            lastMoveRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+            lastMoveRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            lastMoveProperties = new MaterialPropertyBlock();
+            lastMoveFrame.SetActive(false);
         }
 
         private void EnsureMoveRing()

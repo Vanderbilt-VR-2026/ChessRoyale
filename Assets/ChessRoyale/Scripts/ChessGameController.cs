@@ -66,6 +66,11 @@ namespace ChessRoyale
         private bool networkAwaitingAuthority;
         private ChessPieceColor networkSeatColor;
         private bool executingAiMove;
+        private ChessBoardSquare lastMoveFrom;
+        private ChessBoardSquare lastMoveTo;
+        private ChessPieceColor lastMoveColor;
+        private ChessBoardSquare shownLastMoveFrom;
+        private ChessBoardSquare shownLastMoveTo;
         private ChessPieceType aiPromotionType = ChessPieceType.Queen;
 
         private static bool IsSinglePlayer => !MainMenu.LaunchMultiplayer;
@@ -228,6 +233,7 @@ namespace ChessRoyale
             board.Remove(origin);
             board[destination] = piece;
             piece.MoveToSquare(destination);
+            RecordLastMove(origin, destination, piece.PieceColor);
 
             if (piece.PieceType == ChessPieceType.King && Mathf.Abs(destination.FileIndex - origin.FileIndex) == 2)
                 MoveCastlingRook(piece, origin, destination);
@@ -415,6 +421,11 @@ namespace ChessRoyale
             if (!preserveRepetitionHistory)
                 positionCounts.Clear();
 
+            // Remember where every piece stood, so the move this snapshot contains can be highlighted.
+            var squaresBefore = new Dictionary<ChessPieceInteractable, ChessBoardSquare>(pieces.Count);
+            foreach (ChessPieceInteractable piece in pieces)
+                squaresBefore[piece] = piece.IsCaptured ? null : piece.CurrentSquare;
+
             for (int index = 0; index < snapshot.Pieces.Length && index < 32; index++)
             {
                 ChessPieceSnapshot pieceState = snapshot.Pieces[index];
@@ -428,6 +439,7 @@ namespace ChessRoyale
                     board[square] = piece;
             }
 
+            UpdateLastMoveFromSnapshot(squaresBefore);
             activeColor = snapshot.ActiveColor;
             outcome = snapshot.Outcome;
             statusMessage = string.IsNullOrEmpty(snapshot.StatusMessage)
@@ -456,6 +468,7 @@ namespace ChessRoyale
         {
             ClearMoveHints();
             ClearCheckSignal();
+            ClearLastMove();
             board.Clear();
             activeColor = ChessPieceColor.White;
             outcome = ChessGameOutcome.InProgress;
@@ -1051,6 +1064,98 @@ namespace ChessRoyale
             bool gameAcceptsMoves = outcome == ChessGameOutcome.InProgress && pendingPromotionPiece == null && !(networkSessionActive && networkAwaitingAuthority);
             foreach (ChessPieceInteractable piece in pieces)
                 piece.SetTurnEnabled(gameAcceptsMoves && CanLocalPlayerMove(piece));
+            PresentLastMove();
+        }
+
+        // ---- Opponent's last move (issue #73) ----
+
+        private void RecordLastMove(ChessBoardSquare from, ChessBoardSquare to, ChessPieceColor mover)
+        {
+            lastMoveFrom = from;
+            lastMoveTo = to;
+            lastMoveColor = mover;
+            PresentLastMove();
+        }
+
+        private void ClearLastMove()
+        {
+            lastMoveFrom = null;
+            lastMoveTo = null;
+            PresentLastMove();
+        }
+
+        // Networked clients receive whole-board snapshots, not moves, so work out which piece moved.
+        private void UpdateLastMoveFromSnapshot(Dictionary<ChessPieceInteractable, ChessBoardSquare> squaresBefore)
+        {
+            ChessPieceInteractable movedPiece = null;
+            ChessBoardSquare movedFrom = null;
+            int movedCount = 0;
+            foreach (KeyValuePair<ChessPieceInteractable, ChessBoardSquare> entry in squaresBefore)
+            {
+                ChessPieceInteractable piece = entry.Key;
+                if (piece == null || piece.IsCaptured || entry.Value == null || piece.CurrentSquare == null ||
+                    piece.CurrentSquare == entry.Value)
+                    continue;
+
+                movedCount++;
+                // Castling moves king and rook; the king's move is the one to show.
+                if (movedPiece == null || piece.PieceType == ChessPieceType.King)
+                {
+                    movedPiece = piece;
+                    movedFrom = entry.Value;
+                }
+            }
+
+            if (movedCount == 0)
+                return; // Nothing new (e.g. the authority re-applying its own move).
+
+            bool castling = movedCount == 2 && movedPiece.PieceType == ChessPieceType.King;
+            if (movedCount == 1 || castling)
+                RecordLastMove(movedFrom, movedPiece.CurrentSquare, movedPiece.PieceColor);
+            else
+                ClearLastMove(); // A reset or full resync, not a single move.
+        }
+
+        // Shown only while it is the local player's turn and the last move was the opponent's,
+        // so it disappears as soon as the player makes their own move.
+        private void PresentLastMove()
+        {
+            ChessBoardSquare from = null;
+            ChessBoardSquare to = null;
+            if (lastMoveFrom != null && lastMoveTo != null && ShouldShowLastMove())
+            {
+                from = lastMoveFrom;
+                to = lastMoveTo;
+            }
+
+            if (shownLastMoveFrom == from && shownLastMoveTo == to)
+                return;
+
+            if (shownLastMoveFrom != null)
+                shownLastMoveFrom.ClearLastMoveHint();
+            if (shownLastMoveTo != null)
+                shownLastMoveTo.ClearLastMoveHint();
+            shownLastMoveFrom = from;
+            shownLastMoveTo = to;
+            if (from != null)
+                from.SetLastMoveHint(false);
+            if (to != null)
+                to.SetLastMoveHint(true);
+        }
+
+        private bool ShouldShowLastMove()
+        {
+            if (IsSinglePlayer)
+            {
+                ChessPieceColor human = ChessSinglePlayerSettings.HumanColor;
+                return lastMoveColor != human && activeColor == human;
+            }
+
+            if (networkSessionActive && networkHasSeat)
+                return lastMoveColor != networkSeatColor && activeColor == networkSeatColor;
+
+            // Same-headset play or spectating: always show the most recent move.
+            return true;
         }
 
         private void RecordCurrentPosition()
