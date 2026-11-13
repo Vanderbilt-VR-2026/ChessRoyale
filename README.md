@@ -41,6 +41,26 @@ The panel returns after each game with the result, so you can rematch or change 
 
 Claude was used to help write the chess engine, the AI player and setup panel, and their tests; the team reviewed and play-tested it on Meta Quest 3.
 
+## Bird's-eye view (Sprint 4, in progress)
+
+In VR, the default player view looks at the board from one side at an angle. Pieces on the far side are smaller and harder to read, and tall pieces can block the ones behind them. The bird's-eye view moves the camera directly above the board so players can **see the whole board and the overall position at once**, which makes it easier to plan moves and spot threats. Tracked in [#69](https://github.com/Vanderbilt-VR-2026/ChessRoyale/issues/69).
+
+**Player view (default).** The normal seated view of the board. A toggle bar at the bottom shows which view is active, with a hint to press **Y** on the left controller to switch.
+
+![Player view with the view toggle at the bottom](docs/images/birds-eye/player-view.png)
+
+**Bird's-eye view.** The camera sits directly above the board. All 64 squares and every piece are visible, with file (a–h) and rank (1–8) labels around the edge. Players can still pick up and move pieces in this view. Pressing **Y** again returns to the player view.
+
+![Bird's-eye view of the full board from above](docs/images/birds-eye/birds-eye-view.png)
+
+**Planned behaviour:**
+
+- Toggle between the two views with **Y** on the left controller or the on-screen toggle.
+- The camera moves smoothly between views instead of cutting.
+- Grabbing, dragging and placing pieces work the same in both views.
+
+Development happens on the `feature/birds-eye-view` branch and is merged into `sprint-4` through a pull request after review and headset testing.
+
 ## VR controls
 
 | Action | Input |
