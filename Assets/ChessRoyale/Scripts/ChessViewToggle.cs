@@ -53,6 +53,7 @@ namespace ChessRoyale
         private readonly List<LocomotionProvider> pausedLocomotion = new List<LocomotionProvider>();
 
         private InputAction toggleAction;
+        private ChessFusionLobbyUI lobbyMenu;
         private Canvas canvas;
         private Image immersiveBackground;
         private Image birdsEyeBackground;
@@ -99,6 +100,7 @@ namespace ChessRoyale
             EnsureEventSystem();
             BuildPanel();
             RefreshButtons();
+            canvas.enabled = IsGameRunning();
         }
 
         private void OnEnable()
@@ -130,7 +132,41 @@ namespace ChessRoyale
 
         private void OnTogglePressed(InputAction.CallbackContext context)
         {
-            Toggle();
+            if (IsGameRunning())
+                Toggle();
+        }
+
+        // The toggle only belongs to a game in progress. Online that means connected, both seats
+        // filled, this player seated, and no lobby menu (create / join / rematch) on screen.
+        // Single player starts on the board straight away.
+        private bool IsGameRunning()
+        {
+            if (!MainMenu.LaunchMultiplayer)
+                return true;
+
+            ChessFusionRoomManager room = ChessFusionRoomManager.Instance;
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            if (room == null || !room.IsConnected || lobby == null || !lobby.MatchReady || lobby.LocalSeat == ChessSeat.None)
+                return false;
+
+            if (lobbyMenu == null)
+                lobbyMenu = FindAnyObjectByType<ChessFusionLobbyUI>();
+            Canvas menuCanvas = lobbyMenu != null ? lobbyMenu.GetComponent<Canvas>() : null;
+            return menuCanvas == null || !menuCanvas.enabled;
+        }
+
+        private void UpdateVisibility()
+        {
+            bool running = IsGameRunning();
+            if (!running && Mode == ViewMode.BirdsEye)
+                SetMode(ViewMode.Immersive);
+
+            if (canvas == null || canvas.enabled == running)
+                return;
+
+            canvas.enabled = running;
+            if (running)
+                panelPlaced = false;
         }
 
         public void Toggle()
@@ -181,7 +217,9 @@ namespace ChessRoyale
         private void LateUpdate()
         {
             DropBirdsEyeIfRigWasMoved();
-            FollowCamera();
+            UpdateVisibility();
+            if (canvas != null && canvas.enabled)
+                FollowCamera();
         }
 
         // Other code can move the rig while we are up (the match start puts each player at their
