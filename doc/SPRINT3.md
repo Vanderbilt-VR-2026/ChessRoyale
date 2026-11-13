@@ -51,4 +51,5 @@ Limit the ray to menus, add the time presets, and keep the shared match in step 
 
 ## Demo
 
-[Watch the Sprint 3 demo](https://youtu.be/OnBdmAllzGQ).
+https://www.youtube.com/watch?v=QnBdmAIIzGQ
+
