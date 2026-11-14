@@ -50,6 +50,8 @@ namespace ChessRoyale.Networking
         private bool leavingIntentionally;
         private int startGeneration;
         private bool spawnWhenSeated;
+        private bool repositionWhenSeated;
+        private ChessSeatPreference creatorSeatPreference = ChessSeatPreference.Random;
         private bool wasInReadyMatch;
         private ShutdownReason lastStartFailure;
         private bool rigPoseSaved;
@@ -139,6 +141,8 @@ namespace ChessRoyale.Networking
         {
             if (spawnWhenSeated)
                 SpawnLocalPlayer();
+            if (repositionWhenSeated)
+                TryRepositionLocalRig();
             SyncNetworkPlay();
             UpdateVoiceRecording();
         }
@@ -161,6 +165,12 @@ namespace ChessRoyale.Networking
 
         public Task<bool> CreateRoom(string roomCode)
         {
+            return CreateRoom(roomCode, ChessSeatPreference.Random);
+        }
+
+        public Task<bool> CreateRoom(string roomCode, ChessSeatPreference seatPreference)
+        {
+            creatorSeatPreference = seatPreference;
             return StartRoom(roomCode, createRoom: true);
         }
 
@@ -180,6 +190,7 @@ namespace ChessRoyale.Networking
             runner = null;
             localPlayer = null;
             spawnWhenSeated = false;
+            repositionWhenSeated = false;
             CurrentRoomCode = null;
             DisconnectNotice = null;
             ForgetVoice();
@@ -621,7 +632,10 @@ namespace ChessRoyale.Networking
                 return;
 
             if (ChessFusionLobbyState.Instance == null)
-                runner.Spawn(gameStatePrefab, flags: NetworkSpawnFlags.SharedModeStateAuthMasterClient);
+            {
+                NetworkObject stateObject = runner.Spawn(gameStatePrefab, flags: NetworkSpawnFlags.SharedModeStateAuthMasterClient);
+                stateObject?.GetComponent<ChessFusionLobbyState>()?.ConfigureCreator(runner.LocalPlayer, creatorSeatPreference);
+            }
 
             ChessFusionLobbyState.Instance?.RefreshAssignments();
         }
@@ -657,6 +671,7 @@ namespace ChessRoyale.Networking
             }
 
             XROrigin origin = MoveRigToSeat(seat == ChessSeat.White);
+            repositionWhenSeated = false;
             Vector3 position = origin != null ? origin.transform.position : Vector3.zero;
             Quaternion rotation = origin != null ? origin.transform.rotation : Quaternion.identity;
             localPlayer = runner.Spawn(playerPrefab, position, rotation, runner.LocalPlayer);
@@ -667,6 +682,22 @@ namespace ChessRoyale.Networking
             }
 
             runner.SetPlayerObject(runner.LocalPlayer, localPlayer);
+        }
+
+        public void RepositionLocalRigForAssignedSeat()
+        {
+            repositionWhenSeated = true;
+            TryRepositionLocalRig();
+        }
+
+        private void TryRepositionLocalRig()
+        {
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            if (!IsConnected || lobby == null || lobby.LocalSeat == ChessSeat.None)
+                return;
+
+            MoveRigToSeat(lobby.LocalSeat == ChessSeat.White);
+            repositionWhenSeated = false;
         }
 
         // Puts this headset's own rig at its side of the board. The rig is never networked itself;
