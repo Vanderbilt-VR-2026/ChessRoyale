@@ -32,7 +32,7 @@ namespace ChessRoyale.AI
         private ChessAIDifficulty difficulty;
         private Camera followedCamera;
 
-        public bool IsVisible => canvas != null && canvas.enabled;
+        public bool IsVisible => gameObject.activeInHierarchy && canvas != null && canvas.enabled;
 
         public static ChessAISetupPanel Create(ChessAIPlayer owner)
         {
@@ -47,15 +47,25 @@ namespace ChessRoyale.AI
 
         public void Show(string result)
         {
+            // Setup must never interrupt a running match, even if a stale caller tries to show it.
+            if (ChessSinglePlayerSettings.GameStarted)
+            {
+                Debug.LogWarning("Chess Royale: ignored setup panel request during an active single-player game.");
+                return;
+            }
+
             resultText.text = string.IsNullOrEmpty(result) ? "Play the computer" : result;
             RefreshSelection();
             canvas.enabled = true;
             followedCamera = null; // Snap in front of the player right away.
+            gameObject.SetActive(true);
         }
 
         public void Hide()
         {
             canvas.enabled = false;
+            // Disabling Canvas alone leaves the XR raycaster and button handlers active.
+            gameObject.SetActive(false);
         }
 
         private void LateUpdate()
@@ -127,7 +137,7 @@ namespace ChessRoyale.AI
                 () => player.StartGame(colorChoice, difficulty)).color = new Color(0.12f, 0.5f, 0.24f, 1f);
             CreateButton("MAIN MENU", new Vector2(0f, -355f), new Vector2(360f, 70f), player.ReturnToMainMenu);
 
-            canvas.enabled = false;
+            Hide();
         }
 
         private void RefreshSelection()

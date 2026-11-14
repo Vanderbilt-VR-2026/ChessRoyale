@@ -3,6 +3,7 @@ using System.Collections;
 using System.Linq;
 using System.Threading.Tasks;
 using Fusion;
+using Fusion.Sockets;
 using Photon.Voice.Fusion;
 using Photon.Voice.Unity;
 using Unity.XR.CoreUtils;
@@ -262,6 +263,12 @@ namespace ChessRoyale.Networking
             if (!IsReconnecting)
                 DisconnectNotice = null;
 
+            string action = createRoom ? "CREATE" : "JOIN";
+            Debug.Log(
+                $"[ChessFusion] {action} starting. RequestedSession='{roomCode}', GameMode=Shared, " +
+                $"AllowClientSessionCreation={createRoom}. {ChessFusionAppSettings.GetDiagnosticSummary()}",
+                this);
+
             NetworkRunner created = CreateRunner(roomCode);
             try
             {
@@ -296,7 +303,11 @@ namespace ChessRoyale.Networking
                 {
                     lastStartFailure = result.ShutdownReason;
                     LastError = DescribeStartFailure(createRoom, roomCode, result.ShutdownReason);
-                    Debug.LogError(LastError, this);
+                    Debug.LogError(
+                        $"[ChessFusion] {action} failed. RequestedSession='{roomCode}', " +
+                        $"ShutdownReason={result.ShutdownReason}. " +
+                        $"{ChessFusionAppSettings.GetDiagnosticSummary()} UserMessage='{LastError}'",
+                        this);
                     await CleanupFailedConnection(created);
                     return false;
                 }
@@ -320,15 +331,21 @@ namespace ChessRoyale.Networking
                 SpawnLobbyState();
                 SpawnLocalPlayer();
                 Debug.Log(
-                    $"Connected to Chess Royale Fusion Shared Mode room '{roomCode}' as " +
+                    $"[ChessFusion] {action} succeeded. RequestedSession='{roomCode}', " +
+                    $"ActualSession='{created.SessionInfo.Name}', Region='{created.SessionInfo.Region}', " +
+                    $"connected as " +
                     $"{(IsSharedModeMasterClient ? "master client" : "client")} " +
-                    $"({PlayerCount}/{MaximumPlayers}).",
+                    $"({PlayerCount}/{MaximumPlayers}). {ChessFusionAppSettings.GetDiagnosticSummary()}",
                     this);
                 return true;
             }
             catch (Exception exception)
             {
                 LastError = exception.Message;
+                Debug.LogError(
+                    $"[ChessFusion] {action} threw an exception. RequestedSession='{roomCode}', " +
+                    ChessFusionAppSettings.GetDiagnosticSummary(),
+                    this);
                 Debug.LogException(exception, this);
                 await CleanupFailedConnection(created);
                 return false;
@@ -366,6 +383,8 @@ namespace ChessRoyale.Networking
             events.PlayerJoined.AddListener(OnPlayerJoined);
             events.PlayerLeft.AddListener(OnPlayerLeft);
             events.OnSceneLoadDone.AddListener(OnSceneLoadDone);
+            events.OnConnectFailed.AddListener(OnConnectFailed);
+            events.OnDisconnectedFromServer.AddListener(OnDisconnectedFromServer);
             events.OnShutdown.AddListener(OnRunnerShutdown);
 
             SetUpVoice(created);
@@ -384,6 +403,8 @@ namespace ChessRoyale.Networking
             events.PlayerJoined.RemoveListener(OnPlayerJoined);
             events.PlayerLeft.RemoveListener(OnPlayerLeft);
             events.OnSceneLoadDone.RemoveListener(OnSceneLoadDone);
+            events.OnConnectFailed.RemoveListener(OnConnectFailed);
+            events.OnDisconnectedFromServer.RemoveListener(OnDisconnectedFromServer);
             events.OnShutdown.RemoveListener(OnRunnerShutdown);
         }
 
@@ -486,6 +507,24 @@ namespace ChessRoyale.Networking
             ChessFusionLobbyState.Instance?.RefreshAssignments();
             if (player == callbackRunner.LocalPlayer)
                 SpawnLocalPlayer();
+        }
+
+        private void OnConnectFailed(NetworkRunner callbackRunner, NetAddress remoteAddress, NetConnectFailedReason reason)
+        {
+            Debug.LogError(
+                $"[ChessFusion] Connection failed. Runner='{callbackRunner?.name}', " +
+                $"RemoteAddress='{remoteAddress}', Reason={reason}. " +
+                ChessFusionAppSettings.GetDiagnosticSummary(),
+                this);
+        }
+
+        private void OnDisconnectedFromServer(NetworkRunner callbackRunner, NetDisconnectReason reason)
+        {
+            Debug.LogWarning(
+                $"[ChessFusion] Disconnected from server. Session='{CurrentRoomCode ?? "<not-established>"}', " +
+                $"Reason={reason}. " +
+                ChessFusionAppSettings.GetDiagnosticSummary(),
+                this);
         }
 
         private void OnPlayerLeft(NetworkRunner callbackRunner, PlayerRef player)

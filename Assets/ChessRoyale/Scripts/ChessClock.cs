@@ -1,6 +1,5 @@
 using ChessRoyale.Networking;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using UnityEngine.XR.Interaction.Toolkit.UI;
 
@@ -31,7 +30,6 @@ namespace ChessRoyale
         private string shownStatus;
 
         private Transform panel;
-        private Transform singlePlayerLeave;
         private Transform head;
         private bool placed;
         private Image whiteFrame;
@@ -95,13 +93,8 @@ namespace ChessRoyale
             {
                 if (panel != null && panel.gameObject.activeSelf)
                     panel.gameObject.SetActive(false);
-                if (singlePlayerLeave != null && !singlePlayerLeave.gameObject.activeSelf)
-                    singlePlayerLeave.gameObject.SetActive(true);
                 return;
             }
-
-            if (singlePlayerLeave != null && singlePlayerLeave.gameObject.activeSelf)
-                singlePlayerLeave.gameObject.SetActive(false);
 
             bool showClock = ShouldShowClock();
             if (panel != null && panel.gameObject.activeSelf != showClock)
@@ -206,11 +199,6 @@ namespace ChessRoyale
             return match == null || match.Outcome == ChessGameOutcome.InProgress;
         }
 
-        private void LeaveSinglePlayer()
-        {
-            SceneManager.LoadScene("MainMenu");
-        }
-
         private void ShowWaiting(bool waiting)
         {
             if (waitingShown == waiting)
@@ -252,7 +240,7 @@ namespace ChessRoyale
 
         private void LateUpdate()
         {
-            Transform follow = !MainMenu.LaunchMultiplayer ? singlePlayerLeave : panel;
+            Transform follow = panel;
             if (follow == null || !follow.gameObject.activeSelf)
                 return;
 
@@ -335,32 +323,7 @@ namespace ChessRoyale
             statusText = CreateText(rect, "Status", new Vector2(0f, -70f), new Vector2(600f, 50f), 30, FontStyle.Normal);
             matchLeaveRoot = CreateLobbyButton(rect, new Vector2(0f, -130f));
             BuildWaitingRoom(rect);
-            BuildSinglePlayerLeave();
             canvasObject.SetActive(false);
-        }
-
-        private void BuildSinglePlayerLeave()
-        {
-            GameObject canvasObject = new GameObject("Single Player Leave", typeof(RectTransform));
-            canvasObject.transform.SetParent(transform, false);
-            Canvas canvas = canvasObject.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.WorldSpace;
-            canvas.sortingOrder = 10;
-            canvasObject.AddComponent<TrackedDeviceGraphicRaycaster>();
-
-            RectTransform rect = canvasObject.GetComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(280f, 90f);
-            rect.localScale = Vector3.one * 0.0014f;
-            singlePlayerLeave = canvasObject.transform;
-
-            Image background = canvasObject.AddComponent<Image>();
-            background.color = new Color(0.1f, 0.28f, 0.55f, 1f);
-            Button button = canvasObject.AddComponent<Button>();
-            button.targetGraphic = background;
-            button.onClick.AddListener(LeaveSinglePlayer);
-            Text label = CreateText(rect, "Leave Label", Vector2.zero, new Vector2(280f, 90f), 32, FontStyle.Bold);
-            label.text = "LEAVE";
-            canvasObject.SetActive(!MainMenu.LaunchMultiplayer);
         }
 
         private void BuildWaitingRoom(RectTransform parent)

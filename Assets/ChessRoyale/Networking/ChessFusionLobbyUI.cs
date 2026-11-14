@@ -181,8 +181,10 @@ namespace ChessRoyale.Networking
         {
             if (createCodeText != null)
             {
-                bool open = room != null && room.IsConnected && !string.IsNullOrEmpty(room.CurrentRoomCode);
-                createCodeText.text = open ? room.CurrentRoomCode : "LOADING";
+                // A locally generated code is not a usable room until Fusion StartGame succeeds.
+                createCodeText.text = room != null && room.IsConnected && !string.IsNullOrEmpty(room.CurrentRoomCode)
+                    ? room.CurrentRoomCode
+                    : "----";
             }
 
             if (createStatusText == null)
@@ -197,7 +199,7 @@ namespace ChessRoyale.Networking
                 else if (lobby != null && lobby.LocalSeat != ChessSeat.None)
                     createStatusText.text = $"You are {ChessFusionLobbyState.SeatLabel(lobby.LocalSeat)}. Waiting for an opponent.";
                 else
-                    createStatusText.text = "Waiting for an opponent.";
+                    createStatusText.text = "Room ready. Waiting for an opponent.";
                 return;
             }
 
@@ -277,7 +279,7 @@ namespace ChessRoyale.Networking
             CreateNotice = "LOADING";
             screen = LobbyScreen.Create;
             if (createCodeText != null)
-                createCodeText.text = "LOADING";
+                createCodeText.text = "----";
             if (createStatusText != null)
                 createStatusText.text = "Creating the room...";
             ApplyScreen();

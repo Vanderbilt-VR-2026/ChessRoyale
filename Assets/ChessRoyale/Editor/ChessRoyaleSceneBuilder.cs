@@ -298,7 +298,7 @@ namespace ChessRoyale.Editor
                 collider = piece.AddComponent<CapsuleCollider>();
             collider.center = piece.transform.InverseTransformPoint(bounds.center);
             collider.height = bounds.size.y / scale;
-            collider.radius = Mathf.Max(bounds.size.x, bounds.size.z) * 0.42f / scale;
+            collider.radius = Mathf.Max(bounds.size.x, bounds.size.z) * 0.52f / scale;
 
             Rigidbody body = piece.GetComponent<Rigidbody>();
             if (body == null)
@@ -315,7 +315,9 @@ namespace ChessRoyale.Editor
             XRGrabInteractable grab = piece.GetComponent<XRGrabInteractable>();
             if (grab == null)
                 grab = piece.AddComponent<XRGrabInteractable>();
-            grab.movementType = XRBaseInteractable.MovementType.Kinematic;
+            grab.movementType = XRBaseInteractable.MovementType.Instantaneous;
+            grab.attachEaseInTime = 0.03f;
+            grab.smoothPosition = false;
             grab.useDynamicAttach = true;
             grab.trackPosition = true;
             grab.trackRotation = false;
