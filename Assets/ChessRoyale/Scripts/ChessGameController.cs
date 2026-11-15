@@ -1023,6 +1023,7 @@ namespace ChessRoyale
                 // World-space UI is read from its local -Z side; +Z points away from the player.
                 promotionPanel.transform.rotation = Quaternion.LookRotation(promotionPanel.transform.position - camera.transform.position, Vector3.up);
             }
+            ChessUITheme.ApplyPanel(promotionPanel);
             promotionPanel.SetActive(true);
         }
 

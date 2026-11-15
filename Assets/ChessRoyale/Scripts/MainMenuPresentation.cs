@@ -8,6 +8,22 @@ public sealed class MainMenuPresentation : MonoBehaviour
 {
     private void Start()
     {
+        // Replace the original one-unit home-menu edges with headset-readable solid borders.
+        foreach (Button button in GetComponentsInChildren<Button>(true))
+        {
+            bool hasBorder = false;
+            foreach (string edgeName in new[] { "Top", "Bottom", "Left", "Right" })
+            {
+                Transform edge = button.transform.Find(edgeName);
+                if (edge == null)
+                    continue;
+                hasBorder = true;
+                edge.gameObject.SetActive(false);
+            }
+            if (hasBorder && button.image != null)
+                ChessRoyale.ChessUITheme.Border(button.image);
+        }
+
         if (XRSettings.isDeviceActive)
             return;
 

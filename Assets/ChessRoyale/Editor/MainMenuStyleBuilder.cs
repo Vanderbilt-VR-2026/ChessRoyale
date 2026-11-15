@@ -39,7 +39,7 @@ public static class MainMenuStyleBuilder
         TMP_FontAsset font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(Home + "PalaceSerif.asset");
         if (font == null)
         {
-            Font source = AssetDatabase.LoadAssetAtPath<Font>(Home + "CormorantGaramond-Medium.ttf");
+            Font source = AssetDatabase.LoadAssetAtPath<Font>("Assets/ChessRoyale/Resources/CormorantGaramond-Medium.ttf");
             font = TMP_FontAsset.CreateFontAsset(source);
             font.name = "Palace Serif";
             AssetDatabase.CreateAsset(font, Home + "PalaceSerif.asset");
@@ -136,10 +136,10 @@ public static class MainMenuStyleBuilder
         if (border)
         {
             // Separate one-pixel strokes keep edges crisp and do not glow on focus.
-            Edge(rect, "Top", new Vector2(0, 1), Vector2.one, new Vector2(0, 1));
-            Edge(rect, "Bottom", Vector2.zero, new Vector2(1, 0), new Vector2(0, 1));
-            Edge(rect, "Left", Vector2.zero, new Vector2(0, 1), new Vector2(1, 0));
-            Edge(rect, "Right", new Vector2(1, 0), Vector2.one, new Vector2(1, 0));
+            Edge(rect, "Top", new Vector2(0, 1), Vector2.one, new Vector2(0, 4));
+            Edge(rect, "Bottom", Vector2.zero, new Vector2(1, 0), new Vector2(0, 4));
+            Edge(rect, "Left", Vector2.zero, new Vector2(0, 1), new Vector2(4, 0));
+            Edge(rect, "Right", new Vector2(1, 0), Vector2.one, new Vector2(4, 0));
         }
         Button button = rect.gameObject.AddComponent<Button>();
         button.targetGraphic = image;

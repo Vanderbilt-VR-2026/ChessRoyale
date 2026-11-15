@@ -43,12 +43,12 @@ namespace ChessRoyale
         private const float PanelRight = 0.5f;
         private const float PanelDown = 0.42f;
 
-        private static readonly Color PanelColor = new Color(0.08f, 0.09f, 0.11f, 0.88f);
-        private static readonly Color HintColor = new Color(0.08f, 0.09f, 0.11f, 0.75f);
-        private static readonly Color ActiveColor = new Color(0.96f, 0.66f, 0.18f, 1f);
-        private static readonly Color ActiveTextColor = new Color(0.1f, 0.08f, 0.04f, 1f);
+        private static readonly Color PanelColor = ChessUITheme.Surface;
+        private static readonly Color HintColor = ChessUITheme.DarkBrown;
+        private static readonly Color ActiveColor = ChessUITheme.Burgundy;
+        private static readonly Color ActiveTextColor = ChessUITheme.Ivory;
         private static readonly Color InactiveColor = new Color(1f, 1f, 1f, 0f);
-        private static readonly Color InactiveTextColor = Color.white;
+        private static readonly Color InactiveTextColor = ChessUITheme.Ivory;
 
         private readonly List<LocomotionProvider> pausedLocomotion = new List<LocomotionProvider>();
 
@@ -380,7 +380,8 @@ namespace ChessRoyale
 
             RectTransform hint = CreateBox(transform, "Hint", new Vector2(0f, -60f), new Vector2(620f, 60f), HintColor);
             Text hintText = CreateText(hint, "Press Y on the left controller to switch view", 24, FontStyle.Normal);
-            hintText.color = new Color(1f, 1f, 1f, 0.85f);
+            ChessUITheme.ApplyPanel(gameObject);
+            ChessUITheme.Border(track.GetComponent<Image>());
         }
 
         private void CreateSegment(RectTransform parent, string label, Vector2 position, ViewMode mode, out Image background, out Text text)

@@ -73,6 +73,7 @@ public class MainMenu : MonoBehaviour
         button.onClick.AddListener(HideOfflineNotice);
         CreateText(buttonRect, "OK Label", Vector2.zero, new Vector2(280f, 80f), 32).text = "OK";
 
+        ChessRoyale.ChessUITheme.ApplyPanel(root);
         return root;
     }
 

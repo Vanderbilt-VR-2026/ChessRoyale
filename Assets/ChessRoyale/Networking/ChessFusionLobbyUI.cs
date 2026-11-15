@@ -299,9 +299,10 @@ namespace ChessRoyale.Networking
             if (created)
             {
                 CreateNotice = null;
-                // The chess clock owns the single waiting-room display once the room is open.
-                // Hide this transient creation popup so the room code is not shown twice.
-                screen = LobbyScreen.Playing;
+                // Keep the same window from connection progress through waiting for an opponent.
+                // RefreshScreen hides it only once both players are ready to start the match.
+                screen = LobbyScreen.Create;
+                RefreshCreate(room, ChessFusionLobbyState.Instance);
             }
             else
             {
@@ -365,7 +366,7 @@ namespace ChessRoyale.Networking
         private static void SetChoiceButtonColor(Button button, bool selected)
         {
             if (button != null && button.image != null)
-                button.image.color = selected ? new Color(0.12f, 0.58f, 0.32f, 1f) : new Color(0.1f, 0.28f, 0.55f, 1f);
+                ChessUITheme.SetChoice(button.image, selected);
         }
 
         public async void SubmitJoin()
@@ -523,10 +524,16 @@ namespace ChessRoyale.Networking
                 || screen == LobbyScreen.Rematch;
             if (canvas != null)
                 canvas.enabled = showMenu;
+            TrackedDeviceGraphicRaycaster raycaster = GetComponent<TrackedDeviceGraphicRaycaster>();
+            if (raycaster != null)
+                raycaster.enabled = showMenu;
             if (shownScreen == screen)
                 return;
 
             shownScreen = screen;
+            // Reapply after every page transition so all multiplayer choices retain the shared style.
+            ChessUITheme.ApplyPanel(gameObject);
+            RefreshColorChoice();
             if (chooseRoot != null)
                 chooseRoot.SetActive(screen == LobbyScreen.Choose);
             if (joinRoot != null)
@@ -553,15 +560,15 @@ namespace ChessRoyale.Networking
             rect.localScale = Vector3.one * 0.0014f;
 
             Image background = gameObject.AddComponent<Image>();
-            background.color = new Color(0.02f, 0.03f, 0.06f, 0.94f);
+            background.color = ChessUITheme.Surface;
 
             chooseRoot = CreatePage("Choose");
-            CreateText(chooseRoot.transform, "Chess Royale Online", new Vector2(0f, 330f), new Vector2(860f, 80f), 42);
-            CreateText(chooseRoot.transform, "Room creator chooses their side.", new Vector2(0f, 245f), new Vector2(860f, 60f), 28);
-            colorChoiceText = CreateText(chooseRoot.transform, "Your color: RANDOM", new Vector2(0f, 155f), new Vector2(860f, 60f), 28);
-            whiteChoiceButton = CreateButton(chooseRoot.transform, "WHITE", new Vector2(-270f, 65f), ChooseWhite, new Vector2(220f, 72f));
-            randomChoiceButton = CreateButton(chooseRoot.transform, "RANDOM", new Vector2(0f, 65f), ChooseRandom, new Vector2(220f, 72f));
-            blackChoiceButton = CreateButton(chooseRoot.transform, "BLACK", new Vector2(270f, 65f), ChooseBlack, new Vector2(220f, 72f));
+            CreateText(chooseRoot.transform, "Chess Royale Online", new Vector2(0f, 410f), new Vector2(860f, 80f), 42);
+            CreateText(chooseRoot.transform, "Room creator chooses their side.", new Vector2(0f, 330f), new Vector2(860f, 60f), 28);
+            colorChoiceText = CreateText(chooseRoot.transform, "Your color: RANDOM", new Vector2(0f, 240f), new Vector2(860f, 60f), 28);
+            whiteChoiceButton = CreateButton(chooseRoot.transform, "WHITE", new Vector2(-270f, 165f), ChooseWhite, ChessUITheme.ChoiceSize);
+            randomChoiceButton = CreateButton(chooseRoot.transform, "RANDOM", new Vector2(270f, 165f), ChooseRandom, ChessUITheme.ChoiceSize);
+            blackChoiceButton = CreateButton(chooseRoot.transform, "BLACK", new Vector2(0f, 165f), ChooseBlack, ChessUITheme.ChoiceSize);
             CreateButton(chooseRoot.transform, "CREATE", new Vector2(-160f, -75f), BeginCreate);
             CreateButton(chooseRoot.transform, "JOIN", new Vector2(160f, -75f), ShowJoin);
             CreateButton(chooseRoot.transform, "LEAVE", new Vector2(0f, -205f), LeaveLobbyToMenu);
@@ -586,6 +593,8 @@ namespace ChessRoyale.Networking
             rematchStatusText = CreateText(rematchRoot.transform, "The game is over.", new Vector2(0f, 60f), new Vector2(860f, 140f), 26);
             CreateButton(rematchRoot.transform, "REMATCH", new Vector2(0f, -70f), RequestRematch, new Vector2(460f, 72f));
             CreateButton(rematchRoot.transform, "RETURN TO LOBBY", new Vector2(0f, -170f), LeaveMatchToChoose, new Vector2(460f, 72f));
+            ChessUITheme.ApplyPanel(gameObject);
+            RefreshColorChoice();
         }
 
         private GameObject CreatePage(string name)
@@ -610,11 +619,11 @@ namespace ChessRoyale.Networking
             rect.anchoredPosition = position;
             Text text = textObject.AddComponent<Text>();
             text.text = value;
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            ChessUITheme.StyleText(text);
             text.fontSize = fontSize;
-            text.fontStyle = FontStyle.Bold;
+            text.fontStyle = FontStyle.Normal;
             text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
+            text.color = ChessUITheme.Ivory;
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Overflow;
             text.raycastTarget = false;
@@ -623,7 +632,7 @@ namespace ChessRoyale.Networking
 
         private Button CreateButton(Transform parent, string label, Vector2 position, UnityEngine.Events.UnityAction action)
         {
-            return CreateButton(parent, label, position, action, new Vector2(240f, 72f));
+            return CreateButton(parent, label, position, action, ChessUITheme.ChoiceSize);
         }
 
         private Button CreateButton(Transform parent, string label, Vector2 position, UnityEngine.Events.UnityAction action, Vector2 size)
@@ -634,9 +643,12 @@ namespace ChessRoyale.Networking
             rect.sizeDelta = size;
             rect.anchoredPosition = position;
             Image image = buttonObject.AddComponent<Image>();
-            image.color = new Color(0.1f, 0.28f, 0.55f, 1f);
+            image.color = ChessUITheme.DarkBrown;
             Button button = buttonObject.AddComponent<Button>();
+            // Pages are initially inactive, so Selectable.Awake has not assigned this yet.
+            button.targetGraphic = image;
             button.onClick.AddListener(action);
+            ChessUITheme.StyleButton(button, label == "CREATE" || label == "JOIN" || label == "REMATCH");
             Text text = CreateText(buttonObject.transform, label, Vector2.zero, size, 28);
             text.rectTransform.anchoredPosition = Vector2.zero;
             text.rectTransform.sizeDelta = size;
@@ -651,7 +663,7 @@ namespace ChessRoyale.Networking
             rect.sizeDelta = new Vector2(420f, 88f);
             rect.anchoredPosition = position;
             Image image = inputObject.AddComponent<Image>();
-            image.color = new Color(1f, 1f, 1f, 0.92f);
+            image.color = ChessUITheme.DarkBrown;
 
             GameObject textObject = new GameObject("Text", typeof(RectTransform));
             textObject.transform.SetParent(inputObject.transform, false);
@@ -661,10 +673,10 @@ namespace ChessRoyale.Networking
             textRect.offsetMin = new Vector2(8f, 4f);
             textRect.offsetMax = new Vector2(-8f, -4f);
             Text text = textObject.AddComponent<Text>();
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            ChessUITheme.StyleText(text);
             text.fontSize = 40;
             text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.black;
+            text.color = ChessUITheme.Ivory;
             text.supportRichText = false;
 
             GameObject placeholderObject = new GameObject("Placeholder", typeof(RectTransform));
@@ -677,13 +689,14 @@ namespace ChessRoyale.Networking
             Text placeholder = placeholderObject.AddComponent<Text>();
             placeholder.font = text.font;
             placeholder.fontSize = 32;
-            placeholder.fontStyle = FontStyle.Bold;
+            placeholder.fontStyle = FontStyle.Normal;
             placeholder.alignment = TextAnchor.MiddleCenter;
-            placeholder.color = new Color(0f, 0f, 0f, 0.35f);
+            placeholder.color = new Color(ChessUITheme.Ivory.r, ChessUITheme.Ivory.g, ChessUITheme.Ivory.b, 0.5f);
             placeholder.text = "ABCD";
             placeholder.raycastTarget = false;
 
             InputField input = inputObject.AddComponent<InputField>();
+            input.targetGraphic = image;
             input.textComponent = text;
             input.placeholder = placeholder;
             input.characterLimit = ChessNetworkTypes.RoomCodeLength;
@@ -692,6 +705,10 @@ namespace ChessRoyale.Networking
             input.lineType = InputField.LineType.SingleLine;
             input.text = string.Empty;
             input.onValueChanged.AddListener(SanitizeRoomCode);
+            input.customCaretColor = true;
+            input.caretColor = ChessUITheme.Ivory;
+            input.selectionColor = new Color(ChessUITheme.Gold.r, ChessUITheme.Gold.g, ChessUITheme.Gold.b, 0.4f);
+            ChessUITheme.Border(image);
             return input;
         }
 

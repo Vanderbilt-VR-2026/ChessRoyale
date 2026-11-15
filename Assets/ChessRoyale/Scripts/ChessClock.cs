@@ -13,8 +13,8 @@ namespace ChessRoyale
     [DisallowMultipleComponent]
     public sealed class ChessClock : MonoBehaviour
     {
-        private static readonly Color ActiveFrame = new Color(0.78f, 0.58f, 0.18f, 0.95f);
-        private static readonly Color IdleFrame = new Color(0.07f, 0.07f, 0.09f, 0.9f);
+        private static readonly Color ActiveFrame = ChessUITheme.Burgundy;
+        private static readonly Color IdleFrame = ChessUITheme.DarkBrown;
         private static readonly Color LowTime = new Color(1f, 0.3f, 0.25f, 1f);
 
         [SerializeField] private float minutesPerSide = 10f;
@@ -192,7 +192,9 @@ namespace ChessRoyale
 
         private static bool ShouldShowClock()
         {
-            if (!MainMenu.LaunchMultiplayer || !(InNetworkRoom || HostingRoom))
+            // The creator's lobby already owns the connection/waiting window. Never place
+            // the clock's smaller room-code panel on top of it or replace it after connecting.
+            if (!MainMenu.LaunchMultiplayer || !InNetworkRoom || HostingRoom)
                 return false;
 
             ChessGameController match = ChessGameController.Instance;
@@ -274,14 +276,14 @@ namespace ChessRoyale
             {
                 shownWhite = white;
                 whiteText.text = Format(white);
-                whiteText.color = whiteSeconds <= lowTimeSeconds ? LowTime : Color.white;
+                whiteText.color = whiteSeconds <= lowTimeSeconds ? LowTime : ChessUITheme.Ivory;
             }
 
             if (black != shownBlack)
             {
                 shownBlack = black;
                 blackText.text = Format(black);
-                blackText.color = blackSeconds <= lowTimeSeconds ? LowTime : Color.white;
+                blackText.color = blackSeconds <= lowTimeSeconds ? LowTime : ChessUITheme.Ivory;
             }
 
             bool running = game.Outcome == ChessGameOutcome.InProgress && (!InNetworkRoom || NetworkMatchStarted);
@@ -315,7 +317,7 @@ namespace ChessRoyale
             panel = canvasObject.transform;
 
             Image background = canvasObject.AddComponent<Image>();
-            background.color = new Color(0.02f, 0.02f, 0.03f, 0.8f);
+            background.color = ChessUITheme.Surface;
             background.raycastTarget = false;
 
             whiteFrame = CreateBox(rect, "White Timer", new Vector2(-155f, 35f), out whiteText, "WHITE");
@@ -323,6 +325,7 @@ namespace ChessRoyale
             statusText = CreateText(rect, "Status", new Vector2(0f, -70f), new Vector2(600f, 50f), 30, FontStyle.Normal);
             matchLeaveRoot = CreateLobbyButton(rect, new Vector2(0f, -130f));
             BuildWaitingRoom(rect);
+            ChessUITheme.ApplyPanel(canvasObject);
             canvasObject.SetActive(false);
         }
 
@@ -347,9 +350,11 @@ namespace ChessRoyale
             buttonRect.sizeDelta = new Vector2(280f, 64f);
             buttonRect.anchoredPosition = new Vector2(0f, -78f);
             Image image = buttonObject.AddComponent<Image>();
-            image.color = new Color(0.1f, 0.28f, 0.55f, 1f);
+            image.color = ChessUITheme.DarkBrown;
             Button button = buttonObject.AddComponent<Button>();
+            button.targetGraphic = image;
             button.onClick.AddListener(LeaveCreatedRoom);
+            ChessUITheme.StyleButton(button);
             Text label = CreateText(buttonRect, "Leave Label", Vector2.zero, new Vector2(280f, 64f), 28, FontStyle.Bold);
             label.text = "LOBBY";
             waitingRoot.SetActive(false);
@@ -363,9 +368,11 @@ namespace ChessRoyale
             buttonRect.sizeDelta = new Vector2(280f, 64f);
             buttonRect.anchoredPosition = position;
             Image image = buttonObject.AddComponent<Image>();
-            image.color = new Color(0.1f, 0.28f, 0.55f, 1f);
+            image.color = ChessUITheme.DarkBrown;
             Button button = buttonObject.AddComponent<Button>();
+            button.targetGraphic = image;
             button.onClick.AddListener(LeaveCreatedRoom);
+            ChessUITheme.StyleButton(button);
             Text label = CreateText(buttonRect, "Leave Label", Vector2.zero, new Vector2(280f, 64f), 28, FontStyle.Bold);
             label.text = "LOBBY";
             return buttonObject;
@@ -381,6 +388,8 @@ namespace ChessRoyale
 
             Image frame = box.AddComponent<Image>();
             frame.raycastTarget = false;
+            frame.color = ChessUITheme.DarkBrown;
+            ChessUITheme.Border(frame);
 
             CreateText(rect, "Caption", new Vector2(0f, 48f), new Vector2(270f, 40f), 28, FontStyle.Bold).text = caption;
             timeText = CreateText(rect, "Time", new Vector2(0f, -15f), new Vector2(270f, 90f), 70, FontStyle.Bold);
@@ -396,11 +405,11 @@ namespace ChessRoyale
             rect.anchoredPosition = position;
 
             Text text = textObject.AddComponent<Text>();
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            ChessUITheme.StyleText(text);
             text.fontSize = fontSize;
-            text.fontStyle = style;
+            text.fontStyle = FontStyle.Normal;
             text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
+            text.color = ChessUITheme.Ivory;
             text.raycastTarget = false;
             return text;
         }

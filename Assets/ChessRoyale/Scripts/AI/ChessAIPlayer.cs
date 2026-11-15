@@ -99,6 +99,14 @@ namespace ChessRoyale.AI
             Debug.Log($"Chess Royale single player: you are {ChessSinglePlayerSettings.HumanColor}, computer is {difficulty}.");
         }
 
+        public void ReplayGame()
+        {
+            if (panel == null || !panel.IsShowingResult || ChessSinglePlayerSettings.GameStarted)
+                return;
+
+            StartGame(ChessSinglePlayerSettings.SavedColorChoice, ChessSinglePlayerSettings.SavedDifficulty);
+        }
+
         public void ReturnToMainMenu()
         {
             engine.Cancel();
@@ -205,34 +213,10 @@ namespace ChessRoyale.AI
             if (Time.time - gameOverAt < ResultPanelDelaySeconds || panel == null || panel.IsVisible)
                 return;
 
-            Debug.Log($"Chess Royale: showing single-player results/setup after {pendingResult}; {game.StatusMessage}.");
+            Debug.Log($"Chess Royale: showing single-player match result after {pendingResult}; {game.StatusMessage}.");
             ChessSinglePlayerSettings.GameStarted = false;
-            panel.Show(DescribeResult());
+            panel.ShowResult(game.Outcome, ChessSinglePlayerSettings.HumanColor);
             game.RefreshLocalControls();
-        }
-
-        private string DescribeResult()
-        {
-            ChessPieceColor? winner = null;
-            switch (game.Outcome)
-            {
-                case ChessGameOutcome.WhiteCheckmates:
-                case ChessGameOutcome.WhiteWinsOnTime:
-                case ChessGameOutcome.WhiteWinsByDisconnect:
-                    winner = ChessPieceColor.White;
-                    break;
-                case ChessGameOutcome.BlackCheckmates:
-                case ChessGameOutcome.BlackWinsOnTime:
-                case ChessGameOutcome.BlackWinsByDisconnect:
-                    winner = ChessPieceColor.Black;
-                    break;
-            }
-
-            if (winner == null)
-                return $"Draw. {game.StatusMessage}.";
-            return winner == ChessSinglePlayerSettings.HumanColor
-                ? $"You win! {game.StatusMessage}."
-                : $"The computer wins. {game.StatusMessage}.";
         }
 
         // Playing Black means looking at the board from the other side: turn the rig around the board's center.
