@@ -2,6 +2,7 @@ using Fusion;
 using System.Collections.Generic;
 using Unity.XR.CoreUtils;
 using UnityEngine;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace ChessRoyale.Networking
 {
@@ -23,12 +24,19 @@ namespace ChessRoyale.Networking
         private static readonly Color MonkeyLightFur = new Color(0.42f, 0.2f, 0.075f);
         private static readonly Color MonkeyFace = new Color(0.68f, 0.43f, 0.22f);
         private static readonly Color MonkeyEye = new Color(0.01f, 0.008f, 0.006f);
+        private static Material runtimePrimitiveMaterial;
 
         [SerializeField] private Transform head;
         [SerializeField] private Transform leftHand;
         [SerializeField] private Transform rightHand;
         [SerializeField] private Transform body;
         [SerializeField] private float bodyDropBelowHead = 0.75f;
+        [SerializeField] private float fixedHeadHeight = 1.55f;
+        [Header("Humanoid Avatar")]
+        [SerializeField] private GameObject humanoidAvatarPrefab;
+        [SerializeField] private float avatarFeetBelowBody = 0.8f;
+        [SerializeField] private float walkingSpeedThreshold = 0.08f;
+        [SerializeField] private float maxHeadAlignmentOffset = 0.12f;
 
         // 0 = not seated, 1 = White, 2 = Black. Repaints the body when the value arrives.
         [Networked, OnChangedRender(nameof(ApplySeatColor))]
@@ -43,15 +51,45 @@ namespace ChessRoyale.Networking
         [Networked] private Quaternion RightHandRotation { get; set; }
         [Networked] private Vector3 BodyPosition { get; set; }
         [Networked] private Quaternion BodyRotation { get; set; }
+        [Networked] private float MovementSpeed { get; set; }
+        [Networked] private NetworkBool LeftGripping { get; set; }
+        [Networked] private NetworkBool RightGripping { get; set; }
 
         private Transform headSource;
         private Transform leftSource;
         private Transform rightSource;
+        private XRBaseInteractor leftInteractor;
+        private XRBaseInteractor rightInteractor;
         private MaterialPropertyBlock colorBlock;
         private Transform leftArm;
         private Transform rightArm;
         private readonly List<Renderer> seatTintRenderers = new List<Renderer>();
         private bool monkeyBuilt;
+
+        private GameObject humanoidAvatar;
+        private Transform humanoidRoot;
+        private Animator humanoidAnimator;
+        private Transform humanoidHead;
+        private Transform humanoidLeftUpperArm;
+        private Transform humanoidLeftLowerArm;
+        private Transform humanoidLeftHand;
+        private Transform humanoidRightUpperArm;
+        private Transform humanoidRightLowerArm;
+        private Transform humanoidRightHand;
+        private Transform[] leftFingerBones;
+        private Transform[] rightFingerBones;
+        private Quaternion[] leftFingerOpenRotations;
+        private Quaternion[] rightFingerOpenRotations;
+        private Quaternion humanoidHeadRotationOffset = Quaternion.identity;
+        private Quaternion humanoidLeftHandRotationOffset = Quaternion.identity;
+        private Quaternion humanoidRightHandRotationOffset = Quaternion.identity;
+        private Vector3 previousCapturedBodyPosition;
+        private bool hasPreviousCapturedBodyPosition;
+        private float animationTime;
+        private bool humanoidReady;
+
+        private static readonly int StandStateHash = Animator.StringToHash("Base Layer.Stand");
+        private static readonly int WalkStateHash = Animator.StringToHash("Base Layer.Wallk");
 
         public static ChessFusionPlayer Local { get; private set; }
 
@@ -59,7 +97,7 @@ namespace ChessRoyale.Networking
 
         public override void Spawned()
         {
-            EnsureMonkeyAvatar();
+            EnsureVisibleAvatar();
 
             if (Object.HasStateAuthority)
             {
@@ -71,7 +109,7 @@ namespace ChessRoyale.Networking
             {
                 SetRenderersEnabled(true);
                 ApplyFallbackPose();
-                UpdateMonkeyArms();
+                UpdateVisibleAvatar();
             }
 
             ApplySeatColor();
@@ -113,7 +151,15 @@ namespace ChessRoyale.Networking
             ApplyPose(leftHand, LeftHandPosition, LeftHandRotation);
             ApplyPose(rightHand, RightHandPosition, RightHandRotation);
             ApplyPose(body, BodyPosition, BodyRotation);
-            UpdateMonkeyArms();
+            UpdateVisibleAvatar();
+        }
+
+        private void LateUpdate()
+        {
+            if (!humanoidReady || Object == null || !Object.IsValid || Object.HasStateAuthority)
+                return;
+
+            UpdateHumanoidAvatar();
         }
 
         // Finds this headset's scene rig. Only the owner calls this; proxies never read local tracking.
@@ -126,6 +172,8 @@ namespace ChessRoyale.Networking
             headSource = origin.Camera != null ? origin.Camera.transform : null;
             leftSource = FindNamedChild(origin.transform, "Left Controller");
             rightSource = FindNamedChild(origin.transform, "Right Controller");
+            leftInteractor = FindInteractor(leftSource, origin.transform, "Left");
+            rightInteractor = FindInteractor(rightSource, origin.transform, "Right");
         }
 
         private void CaptureTrackedPose()
@@ -133,10 +181,14 @@ namespace ChessRoyale.Networking
             if (headSource == null)
                 return;
 
-            HeadPosition = headSource.position;
+            // Keep every avatar at one consistent height. Room-scale X/Z movement still moves the
+            // avatar, but crouching or changing the headset's floor calibration cannot stretch it.
+            Vector3 fixedHeadPosition = headSource.position;
+            fixedHeadPosition.y = transform.position.y + fixedHeadHeight;
+            HeadPosition = fixedHeadPosition;
             HeadRotation = headSource.rotation;
-            CaptureOptional(leftSource, headSource.position + headSource.rotation * new Vector3(-0.3f, -0.35f, 0.2f), out Vector3 leftPosition, out Quaternion leftRotation);
-            CaptureOptional(rightSource, headSource.position + headSource.rotation * new Vector3(0.3f, -0.35f, 0.2f), out Vector3 rightPosition, out Quaternion rightRotation);
+            CaptureOptional(leftSource, HeadPosition + headSource.rotation * new Vector3(-0.3f, -0.35f, 0.2f), out Vector3 leftPosition, out Quaternion leftRotation);
+            CaptureOptional(rightSource, HeadPosition + headSource.rotation * new Vector3(0.3f, -0.35f, 0.2f), out Vector3 rightPosition, out Quaternion rightRotation);
             LeftHandPosition = leftPosition;
             LeftHandRotation = leftRotation;
             RightHandPosition = rightPosition;
@@ -145,12 +197,37 @@ namespace ChessRoyale.Networking
             CalculateBodyPose(headSource, out Vector3 bodyPosition, out Quaternion bodyRotation);
             BodyPosition = bodyPosition;
             BodyRotation = bodyRotation;
+            Vector3 planarDelta = Vector3.ProjectOnPlane(bodyPosition - previousCapturedBodyPosition, Vector3.up);
+            MovementSpeed = hasPreviousCapturedBodyPosition && Runner.DeltaTime > 0f
+                ? Mathf.Clamp(planarDelta.magnitude / Runner.DeltaTime, 0f, 4f)
+                : 0f;
+            previousCapturedBodyPosition = bodyPosition;
+            hasPreviousCapturedBodyPosition = true;
+            LeftGripping = leftInteractor != null && leftInteractor.hasSelection;
+            RightGripping = rightInteractor != null && rightInteractor.hasSelection;
             HasTrackedPose = true;
 
             ApplyPose(head, HeadPosition, HeadRotation);
             ApplyPose(leftHand, LeftHandPosition, LeftHandRotation);
             ApplyPose(rightHand, RightHandPosition, RightHandRotation);
             ApplyPose(body, BodyPosition, BodyRotation);
+        }
+
+        private static XRBaseInteractor FindInteractor(Transform controller, Transform rigRoot, string sideName)
+        {
+            XRBaseInteractor interactor = controller != null
+                ? controller.GetComponentInChildren<XRBaseInteractor>(true)
+                : null;
+            if (interactor != null || rigRoot == null)
+                return interactor;
+
+            foreach (XRBaseInteractor candidate in rigRoot.GetComponentsInChildren<XRBaseInteractor>(true))
+            {
+                if (candidate.name.Contains(sideName))
+                    return candidate;
+            }
+
+            return null;
         }
 
         private static void CaptureOptional(Transform source, Vector3 fallbackPosition, out Vector3 position, out Quaternion rotation)
@@ -167,7 +244,10 @@ namespace ChessRoyale.Networking
             if (forward.sqrMagnitude < 0.0001f)
                 forward = Vector3.ProjectOnPlane(source.up, Vector3.up);
             rotation = forward.sqrMagnitude < 0.0001f ? transform.rotation : Quaternion.LookRotation(forward.normalized, Vector3.up);
-            position = source.position + Vector3.down * bodyDropBelowHead;
+            position = new Vector3(
+                source.position.x,
+                transform.position.y + fixedHeadHeight - bodyDropBelowHead,
+                source.position.z);
         }
 
         private void ApplyFallbackPose()
@@ -179,7 +259,7 @@ namespace ChessRoyale.Networking
             ApplyPose(body, transform.position + up * 0.8f, transform.rotation);
             ApplyPose(leftHand, transform.position + up * 1.05f - right * 0.38f + forward * 0.08f, transform.rotation);
             ApplyPose(rightHand, transform.position + up * 1.05f + right * 0.38f + forward * 0.08f, transform.rotation);
-            UpdateMonkeyArms();
+            UpdateVisibleAvatar();
         }
 
         private static void ApplyPose(Transform target, Vector3 position, Quaternion rotation)
@@ -223,6 +303,198 @@ namespace ChessRoyale.Networking
 
             foreach (Renderer renderer in body.GetComponentsInChildren<Renderer>(true))
                 SetRendererColor(renderer, color);
+        }
+
+        private void EnsureVisibleAvatar()
+        {
+            if (TryBuildHumanoidAvatar())
+                return;
+
+            EnsureMonkeyAvatar();
+        }
+
+        private bool TryBuildHumanoidAvatar()
+        {
+            if (humanoidReady)
+                return true;
+            if (humanoidAvatarPrefab == null || head == null || leftHand == null || rightHand == null || body == null)
+                return false;
+
+            humanoidAvatar = Instantiate(humanoidAvatarPrefab, transform);
+            humanoidAvatar.name = "Network Humanoid Avatar";
+            humanoidRoot = humanoidAvatar.transform;
+            humanoidRoot.localPosition = Vector3.zero;
+            humanoidRoot.localRotation = Quaternion.identity;
+
+            humanoidAnimator = humanoidAvatar.GetComponent<Animator>();
+            if (humanoidAnimator == null || !humanoidAnimator.isHuman)
+            {
+                Destroy(humanoidAvatar);
+                humanoidAvatar = null;
+                return false;
+            }
+
+            humanoidAnimator.applyRootMotion = false;
+            humanoidAnimator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            humanoidAnimator.speed = 0f;
+            humanoidAnimator.Play(StandStateHash, 0, 0f);
+            humanoidAnimator.Update(0f);
+
+            humanoidHead = humanoidAnimator.GetBoneTransform(HumanBodyBones.Head);
+            humanoidLeftUpperArm = humanoidAnimator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+            humanoidLeftLowerArm = humanoidAnimator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+            humanoidLeftHand = humanoidAnimator.GetBoneTransform(HumanBodyBones.LeftHand);
+            humanoidRightUpperArm = humanoidAnimator.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            humanoidRightLowerArm = humanoidAnimator.GetBoneTransform(HumanBodyBones.RightLowerArm);
+            humanoidRightHand = humanoidAnimator.GetBoneTransform(HumanBodyBones.RightHand);
+
+            humanoidReady = humanoidHead != null &&
+                humanoidLeftUpperArm != null && humanoidLeftLowerArm != null && humanoidLeftHand != null &&
+                humanoidRightUpperArm != null && humanoidRightLowerArm != null && humanoidRightHand != null;
+            if (!humanoidReady)
+            {
+                Destroy(humanoidAvatar);
+                humanoidAvatar = null;
+                return false;
+            }
+
+            humanoidHeadRotationOffset = Quaternion.Inverse(humanoidRoot.rotation) * humanoidHead.rotation;
+            humanoidLeftHandRotationOffset = Quaternion.Inverse(humanoidRoot.rotation) * humanoidLeftHand.rotation;
+            humanoidRightHandRotationOffset = Quaternion.Inverse(humanoidRoot.rotation) * humanoidRightHand.rotation;
+            leftFingerBones = GetFingerBones(humanoidAnimator, true);
+            rightFingerBones = GetFingerBones(humanoidAnimator, false);
+            leftFingerOpenRotations = CaptureLocalRotations(leftFingerBones);
+            rightFingerOpenRotations = CaptureLocalRotations(rightFingerBones);
+
+            SetNamedChildActive(head, "Head Visual", false);
+            SetNamedChildActive(head, "Visor", false);
+            SetNamedChildActive(body, "Body Visual", false);
+            SetNamedChildActive(leftHand, "Left Controller Visual", false);
+            SetNamedChildActive(rightHand, "Right Controller Visual", false);
+
+            return true;
+        }
+
+        private void UpdateVisibleAvatar()
+        {
+            if (humanoidReady)
+                return;
+
+            UpdateMonkeyArms();
+        }
+
+        private void UpdateHumanoidAvatar()
+        {
+            if (humanoidRoot == null || humanoidAnimator == null || body == null)
+                return;
+
+            humanoidRoot.SetPositionAndRotation(body.position - body.up * avatarFeetBelowBody, body.rotation);
+
+            bool walking = MovementSpeed > walkingSpeedThreshold;
+            animationTime += Time.deltaTime * (walking ? Mathf.Clamp(MovementSpeed * 1.4f, 0.8f, 2.2f) : 0.35f);
+            humanoidAnimator.Play(walking ? WalkStateHash : StandStateHash, 0, animationTime % 1f);
+            humanoidAnimator.Update(0f);
+
+            if (humanoidHead != null && head != null)
+            {
+                // Move the whole rig a little to meet the headset instead of pulling the head bone
+                // away from the neck, which visibly stretches the avatar's head and neck mesh.
+                Vector3 headAlignment = Vector3.ClampMagnitude(
+                    head.position - humanoidHead.position,
+                    maxHeadAlignmentOffset);
+                humanoidRoot.position += headAlignment;
+                humanoidHead.rotation = head.rotation * humanoidHeadRotationOffset;
+            }
+
+            SolveTwoBoneArm(humanoidLeftUpperArm, humanoidLeftLowerArm, humanoidLeftHand, leftHand,
+                -humanoidRoot.right, humanoidLeftHandRotationOffset);
+            SolveTwoBoneArm(humanoidRightUpperArm, humanoidRightLowerArm, humanoidRightHand, rightHand,
+                humanoidRoot.right, humanoidRightHandRotationOffset);
+
+            ApplyFingerCurl(leftFingerBones, leftFingerOpenRotations, LeftGripping);
+            ApplyFingerCurl(rightFingerBones, rightFingerOpenRotations, RightGripping);
+        }
+
+        private static void SolveTwoBoneArm(
+            Transform upperArm,
+            Transform lowerArm,
+            Transform handBone,
+            Transform target,
+            Vector3 elbowSide,
+            Quaternion handRotationOffset)
+        {
+            if (upperArm == null || lowerArm == null || handBone == null || target == null)
+                return;
+
+            Vector3 shoulder = upperArm.position;
+            Vector3 elbow = lowerArm.position;
+            Vector3 wrist = handBone.position;
+            float upperLength = Vector3.Distance(shoulder, elbow);
+            float lowerLength = Vector3.Distance(elbow, wrist);
+            Vector3 toTarget = target.position - shoulder;
+            float targetDistance = Mathf.Clamp(toTarget.magnitude, 0.02f, Mathf.Max(0.02f, upperLength + lowerLength - 0.005f));
+            Vector3 targetDirection = toTarget.sqrMagnitude > 0.0001f ? toTarget.normalized : upperArm.forward;
+
+            Vector3 bendDirection = Vector3.ProjectOnPlane(elbowSide + Vector3.down * 0.3f, targetDirection).normalized;
+            if (bendDirection.sqrMagnitude < 0.0001f)
+                bendDirection = Vector3.ProjectOnPlane(Vector3.up, targetDirection).normalized;
+
+            float cosine = Mathf.Clamp(
+                (upperLength * upperLength + targetDistance * targetDistance - lowerLength * lowerLength) /
+                Mathf.Max(0.0001f, 2f * upperLength * targetDistance), -1f, 1f);
+            float sine = Mathf.Sqrt(Mathf.Max(0f, 1f - cosine * cosine));
+            Vector3 desiredElbow = shoulder + targetDirection * (cosine * upperLength) + bendDirection * (sine * upperLength);
+
+            upperArm.rotation = Quaternion.FromToRotation(elbow - shoulder, desiredElbow - shoulder) * upperArm.rotation;
+            elbow = lowerArm.position;
+            wrist = handBone.position;
+            lowerArm.rotation = Quaternion.FromToRotation(wrist - elbow, target.position - elbow) * lowerArm.rotation;
+            handBone.SetPositionAndRotation(target.position, target.rotation * handRotationOffset);
+        }
+
+        private static Transform[] GetFingerBones(Animator animator, bool left)
+        {
+            HumanBodyBones[] bones = left
+                ? new[]
+                {
+                    HumanBodyBones.LeftIndexProximal, HumanBodyBones.LeftIndexIntermediate, HumanBodyBones.LeftIndexDistal,
+                    HumanBodyBones.LeftMiddleProximal, HumanBodyBones.LeftMiddleIntermediate, HumanBodyBones.LeftMiddleDistal,
+                    HumanBodyBones.LeftRingProximal, HumanBodyBones.LeftRingIntermediate, HumanBodyBones.LeftRingDistal,
+                    HumanBodyBones.LeftLittleProximal, HumanBodyBones.LeftLittleIntermediate, HumanBodyBones.LeftLittleDistal,
+                }
+                : new[]
+                {
+                    HumanBodyBones.RightIndexProximal, HumanBodyBones.RightIndexIntermediate, HumanBodyBones.RightIndexDistal,
+                    HumanBodyBones.RightMiddleProximal, HumanBodyBones.RightMiddleIntermediate, HumanBodyBones.RightMiddleDistal,
+                    HumanBodyBones.RightRingProximal, HumanBodyBones.RightRingIntermediate, HumanBodyBones.RightRingDistal,
+                    HumanBodyBones.RightLittleProximal, HumanBodyBones.RightLittleIntermediate, HumanBodyBones.RightLittleDistal,
+                };
+
+            Transform[] transforms = new Transform[bones.Length];
+            for (int i = 0; i < bones.Length; i++)
+                transforms[i] = animator.GetBoneTransform(bones[i]);
+            return transforms;
+        }
+
+        private static Quaternion[] CaptureLocalRotations(Transform[] bones)
+        {
+            Quaternion[] rotations = new Quaternion[bones.Length];
+            for (int i = 0; i < bones.Length; i++)
+                rotations[i] = bones[i] != null ? bones[i].localRotation : Quaternion.identity;
+            return rotations;
+        }
+
+        private static void ApplyFingerCurl(Transform[] bones, Quaternion[] openRotations, bool gripping)
+        {
+            if (bones == null || openRotations == null)
+                return;
+
+            float curl = gripping ? 62f : 0f;
+            for (int i = 0; i < bones.Length; i++)
+            {
+                if (bones[i] != null)
+                    bones[i].localRotation = openRotations[i] * Quaternion.AngleAxis(curl, Vector3.right);
+            }
         }
 
         private void EnsureMonkeyAvatar()
@@ -300,8 +572,30 @@ namespace ChessRoyale.Networking
                 Destroy(collider);
 
             Renderer renderer = part.GetComponent<Renderer>();
+            Material primitiveMaterial = GetRuntimePrimitiveMaterial();
+            if (renderer != null && primitiveMaterial != null)
+                renderer.sharedMaterial = primitiveMaterial;
             SetRendererColor(renderer, color);
             return renderer;
+        }
+
+        private static Material GetRuntimePrimitiveMaterial()
+        {
+            if (runtimePrimitiveMaterial != null)
+                return runtimePrimitiveMaterial;
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null)
+                shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null)
+                return null;
+
+            runtimePrimitiveMaterial = new Material(shader)
+            {
+                name = "Chess Royale Runtime Avatar Material",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            return runtimePrimitiveMaterial;
         }
 
         private static void SetNamedChildActive(Transform root, string childName, bool active)

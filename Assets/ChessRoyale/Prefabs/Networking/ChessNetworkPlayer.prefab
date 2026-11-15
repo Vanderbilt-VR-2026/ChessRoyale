@@ -212,6 +212,11 @@ MonoBehaviour:
   rightHand: {fileID: 6754451118858298420}
   body: {fileID: 9101424352273729286}
   bodyDropBelowHead: 0.75
+  fixedHeadHeight: 1.55
+  humanoidAvatarPrefab: {fileID: 3626430853438140692, guid: 087c658005d534e9d820022711ea696d, type: 3}
+  avatarFeetBelowBody: 0.8
+  walkingSpeedThreshold: 0.08
+  maxHeadAlignmentOffset: 0.12
   _SeatColor: 0
 --- !u!1 &2391956002623068277
 GameObject:

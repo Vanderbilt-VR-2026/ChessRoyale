@@ -290,11 +290,27 @@ namespace ChessRoyale
             whiteFrame.color = running && game.ActiveColor == ChessPieceColor.White ? ActiveFrame : IdleFrame;
             blackFrame.color = running && game.ActiveColor == ChessPieceColor.Black ? ActiveFrame : IdleFrame;
 
-            if (shownStatus != game.StatusMessage)
+            string displayStatus = GetDisplayStatus();
+            if (shownStatus != displayStatus)
             {
-                shownStatus = game.StatusMessage;
+                shownStatus = displayStatus;
                 statusText.text = shownStatus;
             }
+        }
+
+        private string GetDisplayStatus()
+        {
+            if (game.Outcome != ChessGameOutcome.InProgress || !InNetworkRoom)
+                return game.StatusMessage;
+
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            if (lobby == null || lobby.LocalSeat == ChessSeat.None)
+                return game.StatusMessage;
+
+            ChessPieceColor localColor = lobby.LocalSeat == ChessSeat.White
+                ? ChessPieceColor.White
+                : ChessPieceColor.Black;
+            return game.ActiveColor == localColor ? "Your turn" : "Opponent's turn";
         }
 
         private static string Format(int totalSeconds)
