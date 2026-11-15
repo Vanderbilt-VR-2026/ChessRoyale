@@ -2,7 +2,7 @@
 
 Sprint 4 improves multiplayer presence and makes the match easier to read. The main addition in this update is a visible, animated opponent avatar that works between a Quest build and a player running in the Unity Editor.
 
-The other sprint notes are [Sprint 1](SPRINT1.md), [Sprint 2](SPRINT2.md), and [Sprint 3](SPRINT3.md). The [project README](../README.md) describes the game as it is now.
+The other sprint notes are [Sprint 1](SPRINT1.md), [Sprint 2](SPRINT2.md), and [Sprint 3](SPRINT3.md). The [project README](../README.md) describes the game as it is now. A recording of the avatar in a match is [sprint-4-avatar.mp4](sprint-4-avatar.mp4).
 
 ## Multiplayer opponent avatar
 
