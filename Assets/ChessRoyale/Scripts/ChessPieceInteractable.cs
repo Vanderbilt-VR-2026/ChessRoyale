@@ -113,6 +113,8 @@ namespace ChessRoyale
             ActivePieces.Add(this);
             grabInteractable.selectEntered.AddListener(OnGrabbed);
             grabInteractable.selectExited.AddListener(OnReleased);
+            grabInteractable.hoverEntered.AddListener(OnHoverEntered);
+            grabInteractable.hoverExited.AddListener(OnHoverExited);
         }
 
         private void OnDisable()
@@ -122,6 +124,9 @@ namespace ChessRoyale
             ActivePieces.Remove(this);
             grabInteractable.selectEntered.RemoveListener(OnGrabbed);
             grabInteractable.selectExited.RemoveListener(OnReleased);
+            grabInteractable.hoverEntered.RemoveListener(OnHoverEntered);
+            grabInteractable.hoverExited.RemoveListener(OnHoverExited);
+            GetComponent<ChessLastMoveOutline>()?.SetTargeted(false);
         }
 
         private void OnDestroy()
@@ -184,8 +189,20 @@ namespace ChessRoyale
             boardSettlementPending = false;
         }
 
+        private void OnHoverEntered(HoverEnterEventArgs args) => SetTargetOutline(true);
+        private void OnHoverExited(HoverExitEventArgs args) => SetTargetOutline(grabInteractable.isHovered || grabInteractable.isSelected);
+
+        private void SetTargetOutline(bool targeted)
+        {
+            ChessLastMoveOutline outline = GetComponent<ChessLastMoveOutline>();
+            if (targeted && outline == null)
+                outline = gameObject.AddComponent<ChessLastMoveOutline>();
+            outline?.SetTargeted(targeted);
+        }
+
         private void OnGrabbed(SelectEnterEventArgs _)
         {
+            SetTargetOutline(true);
             grabOriginSquare = currentSquare;
             holdDropPresentation = false;
             hasBoardBounds = ChessBoardSquare.TryGetBoardBounds(out boardBounds);
@@ -201,6 +218,7 @@ namespace ChessRoyale
 
         private void OnReleased(SelectExitEventArgs args)
         {
+            SetTargetOutline(grabInteractable.isHovered);
             if (args.isCanceled)
             {
                 moveAllowed = false;
@@ -266,7 +284,12 @@ namespace ChessRoyale
         internal Vector3 ConstrainHeldPosition(Vector3 position)
         {
             if (!hasBoardBounds)
-                return position;
+                hasBoardBounds = ChessBoardSquare.TryGetBoardBounds(out boardBounds);
+            if (!hasBoardBounds)
+            {
+                ChessBoardSquare fallbackSquare = grabOriginSquare ?? currentSquare ?? startingSquare;
+                return fallbackSquare != null ? GetRestingPosition(fallbackSquare) : startingPosition;
+            }
 
             float boardHeight = boardBounds.max.y + baseOffset;
             if (!float.IsFinite(position.x) || !float.IsFinite(position.y) || !float.IsFinite(position.z))

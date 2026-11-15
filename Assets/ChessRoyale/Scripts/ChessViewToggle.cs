@@ -13,10 +13,10 @@ namespace ChessRoyale
 {
     /// <summary>
     /// Switches between the normal standing view ("Immersive") and a raised view over the board
-    /// ("Bird's-eye"). A small segmented toggle floats at the lower right of the player's view, and
+    /// ("Overview"). A small segmented toggle floats at the lower right of the player's view, and
     /// the Y button on the left controller (B on the keyboard in the editor) flips between the two.
     ///
-    /// Bird's-eye lifts the XR rig above the player's own side of the board, facing the opponent,
+    /// Overview places the XR rig behind the player's king's starting square, facing the opponent,
     /// so looking down shows the whole board. Walking, teleporting and gravity are paused while up
     /// there (turning still works); switching back puts the rig exactly where it was.
     /// </summary>
@@ -26,15 +26,14 @@ namespace ChessRoyale
         public enum ViewMode
         {
             Immersive,
-            BirdsEye,
+            Overview,
         }
 
         private const string ChessSceneName = "ChessRoyaleVR";
 
-        // Rig height above the board surface, and how far back from the board centre toward the
-        // player's own side. With a ~1.6 m eye height this shows all 64 squares when looking down.
-        private const float BirdsEyeHeight = 7f;
-        private const float BirdsEyeBackOffset = 5f;
+        // Fixed observation point behind the player's king's starting square, not its current square.
+        [SerializeField, Min(0f)] private float overviewHeight = 4.5f;
+        [SerializeField, Min(0f)] private float overviewBackOffset = 3f;
 
         // Fallback board layout from ChessRoyaleSceneBuilder, used only if no squares are found.
         private static readonly Vector3 FallbackBoardCenter = new Vector3(0f, 0.42f, 2f);
@@ -56,13 +55,13 @@ namespace ChessRoyale
         private ChessFusionLobbyUI lobbyMenu;
         private Canvas canvas;
         private Image immersiveBackground;
-        private Image birdsEyeBackground;
+        private Image overviewBackground;
         private Text immersiveLabel;
-        private Text birdsEyeLabel;
+        private Text overviewLabel;
 
         private Vector3 savedRigPosition;
         private Quaternion savedRigRotation;
-        private float birdsEyeRigY;
+        private float overviewRigY;
 
         private bool panelPlaced;
         private bool panelFollowing;
@@ -100,12 +99,12 @@ namespace ChessRoyale
             EnsureEventSystem();
             BuildPanel();
             RefreshButtons();
-            canvas.enabled = IsGameRunning();
+            UpdateVisibility();
         }
 
         private void OnEnable()
         {
-            toggleAction = new InputAction("Toggle Bird's-eye View", InputActionType.Button);
+            toggleAction = new InputAction("Toggle Overview View", InputActionType.Button);
             toggleAction.AddBinding("<XRController>{LeftHand}/secondaryButton");
             toggleAction.AddBinding("<Keyboard>/b");
             toggleAction.performed += OnTogglePressed;
@@ -138,11 +137,14 @@ namespace ChessRoyale
 
         // The toggle only belongs to a game in progress. Online that means connected, both seats
         // filled, this player seated, and no lobby menu (create / join / rematch) on screen.
-        // Single player starts on the board straight away.
+        // Single-player setup and results are not part of an active match.
         private bool IsGameRunning()
         {
+            ChessGameController game = ChessGameController.Instance;
+            if (game == null || game.Outcome != ChessGameOutcome.InProgress)
+                return false;
             if (!MainMenu.LaunchMultiplayer)
-                return true;
+                return ChessSinglePlayerSettings.GameStarted;
 
             ChessFusionRoomManager room = ChessFusionRoomManager.Instance;
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
@@ -158,7 +160,10 @@ namespace ChessRoyale
         private void UpdateVisibility()
         {
             bool running = IsGameRunning();
-            if (!running && Mode == ViewMode.BirdsEye)
+            TrackedDeviceGraphicRaycaster raycaster = GetComponent<TrackedDeviceGraphicRaycaster>();
+            if (raycaster != null)
+                raycaster.enabled = running;
+            if (!running && Mode == ViewMode.Overview)
                 SetMode(ViewMode.Immersive);
 
             if (canvas == null || canvas.enabled == running)
@@ -171,52 +176,68 @@ namespace ChessRoyale
 
         public void Toggle()
         {
-            SetMode(Mode == ViewMode.Immersive ? ViewMode.BirdsEye : ViewMode.Immersive);
+            SetMode(Mode == ViewMode.Immersive ? ViewMode.Overview : ViewMode.Immersive);
         }
 
         public void SetMode(ViewMode mode)
         {
-            if (mode == Mode)
+            if (mode == Mode || (mode == ViewMode.Overview && !IsGameRunning()))
                 return;
 
             XROrigin origin = FindAnyObjectByType<XROrigin>();
             if (origin == null)
                 return;
 
-            if (mode == ViewMode.BirdsEye)
-                EnterBirdsEye(origin);
+            if (mode == ViewMode.Overview)
+                EnterOverview(origin);
             else
-                ExitBirdsEye(origin);
+                ExitOverview(origin);
 
             RefreshButtons();
         }
 
-        private void EnterBirdsEye(XROrigin origin)
+        private void EnterOverview(XROrigin origin)
         {
-            Vector3 center = FindBoardCenter();
-            Vector3 forward = PlayerForward(origin, center);
+            ChessPieceColor color = LocalPlayerColor();
+            Vector3 forward = color == ChessPieceColor.Black ? Vector3.back : Vector3.forward;
+            Vector3 kingStart = FindKingStart(color);
 
             savedRigPosition = origin.transform.position;
             savedRigRotation = origin.transform.rotation;
             PauseLocomotion();
 
-            Vector3 position = center - forward * BirdsEyeBackOffset;
-            position.y = center.y + BirdsEyeHeight;
-            PlaceRig(origin, position, Quaternion.LookRotation(forward, Vector3.up));
-            birdsEyeRigY = position.y;
-            Mode = ViewMode.BirdsEye;
+            Vector3 position = kingStart - forward * overviewBackOffset;
+            position.y = kingStart.y + overviewHeight;
+            Quaternion rotation = Quaternion.LookRotation(forward, Vector3.up);
+            if (origin.Camera != null)
+            {
+                // Align only yaw, leaving tracked head pitch/roll untouched. Compensate for
+                // room-scale walking so the physical head, not just the rig root, is behind the king.
+                Vector3 headForward = Vector3.ProjectOnPlane(origin.Camera.transform.forward, Vector3.up);
+                Quaternion yaw = headForward.sqrMagnitude > 0.001f
+                    ? Quaternion.AngleAxis(Vector3.SignedAngle(headForward, forward, Vector3.up), Vector3.up)
+                    : rotation * Quaternion.Inverse(origin.transform.rotation);
+                rotation = yaw * origin.transform.rotation;
+                Vector3 headOffset = yaw * (origin.Camera.transform.position - origin.transform.position);
+                position -= new Vector3(headOffset.x, 0f, headOffset.z);
+            }
+            PlaceRig(origin, position, rotation);
+            panelPlaced = false;
+            overviewRigY = position.y;
+            Mode = ViewMode.Overview;
         }
 
-        private void ExitBirdsEye(XROrigin origin)
+        private void ExitOverview(XROrigin origin)
         {
             PlaceRig(origin, savedRigPosition, savedRigRotation);
             ResumeLocomotion();
             Mode = ViewMode.Immersive;
+            panelPlaced = false;
         }
 
         private void LateUpdate()
         {
-            DropBirdsEyeIfRigWasMoved();
+            DropOverviewIfRigWasMoved();
             UpdateVisibility();
             if (canvas != null && canvas.enabled)
                 FollowCamera();
@@ -226,13 +247,13 @@ namespace ChessRoyale
         // seat; leaving a room puts them back). Snap turning only rotates around the head, so the
         // height stays put; a height change means someone else placed the rig. Hand control back
         // without undoing their move.
-        private void DropBirdsEyeIfRigWasMoved()
+        private void DropOverviewIfRigWasMoved()
         {
-            if (Mode != ViewMode.BirdsEye)
+            if (Mode != ViewMode.Overview)
                 return;
 
             XROrigin origin = FindAnyObjectByType<XROrigin>();
-            if (origin != null && Mathf.Abs(origin.transform.position.y - birdsEyeRigY) < 0.25f)
+            if (origin != null && Mathf.Abs(origin.transform.position.y - overviewRigY) < 0.25f)
                 return;
 
             ResumeLocomotion();
@@ -240,20 +261,27 @@ namespace ChessRoyale
             RefreshButtons();
         }
 
-        // White plays toward +Z and Black toward -Z. Online, the seat decides; offline, whichever
-        // end of the board the player is standing at.
-        private static Vector3 PlayerForward(XROrigin origin, Vector3 boardCenter)
+        private static ChessPieceColor LocalPlayerColor()
         {
+            if (!MainMenu.LaunchMultiplayer)
+                return ChessSinglePlayerSettings.HumanColor;
+
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
-            if (lobby != null && lobby.LocalSeat != ChessSeat.None)
-                return lobby.LocalSeat == ChessSeat.Black ? Vector3.back : Vector3.forward;
+            return lobby != null && lobby.LocalSeat == ChessSeat.Black ? ChessPieceColor.Black : ChessPieceColor.White;
+        }
 
-            float offset = origin.transform.position.z - boardCenter.z;
-            if (Mathf.Abs(offset) > 0.5f)
-                return offset > 0f ? Vector3.back : Vector3.forward;
+        private static Vector3 FindKingStart(ChessPieceColor color)
+        {
+            int rank = color == ChessPieceColor.Black ? 7 : 0;
+            foreach (ChessBoardSquare square in FindObjectsByType<ChessBoardSquare>(FindObjectsSortMode.None))
+            {
+                if (square.FileIndex == 4 && square.RankIndex == rank)
+                    return square.Center;
+            }
 
-            Vector3 facing = origin.Camera != null ? origin.Camera.transform.forward : origin.transform.forward;
-            return facing.z < 0f ? Vector3.back : Vector3.forward;
+            // Standard board: E1/E8 are one unit to the right of centre and seven toward either end.
+            Vector3 center = FindBoardCenter();
+            return center + new Vector3(1f, 0f, color == ChessPieceColor.Black ? 7f : -7f);
         }
 
         private static Vector3 FindBoardCenter()
@@ -269,7 +297,7 @@ namespace ChessRoyale
         }
 
         // Walking, teleporting and gravity would pull the player off the raised view, so pause
-        // every locomotion provider except turning while in Bird's-eye.
+        // every locomotion provider except turning while in Overview.
         private void PauseLocomotion()
         {
             pausedLocomotion.Clear();
@@ -324,7 +352,7 @@ namespace ChessRoyale
             Vector3 goal = head.position + head.forward * PanelDistance + head.right * PanelRight - head.up * PanelDown;
             Quaternion goalRotation = Quaternion.LookRotation(goal - head.position, head.up);
 
-            // First frame, or a big jump such as entering/leaving Bird's-eye: snap instead of gliding.
+            // First frame, or a big jump such as entering/leaving Overview: snap instead of gliding.
             float distance = Vector3.Distance(transform.position, goal);
             if (!panelPlaced || distance > 3f)
             {
@@ -350,15 +378,15 @@ namespace ChessRoyale
 
         private void RefreshButtons()
         {
-            bool birdsEye = Mode == ViewMode.BirdsEye;
+            bool overview = Mode == ViewMode.Overview;
             if (immersiveBackground != null)
-                immersiveBackground.color = birdsEye ? InactiveColor : ActiveColor;
-            if (birdsEyeBackground != null)
-                birdsEyeBackground.color = birdsEye ? ActiveColor : InactiveColor;
+                immersiveBackground.color = overview ? InactiveColor : ActiveColor;
+            if (overviewBackground != null)
+                overviewBackground.color = overview ? ActiveColor : InactiveColor;
             if (immersiveLabel != null)
-                immersiveLabel.color = birdsEye ? InactiveTextColor : ActiveTextColor;
-            if (birdsEyeLabel != null)
-                birdsEyeLabel.color = birdsEye ? ActiveTextColor : InactiveTextColor;
+                immersiveLabel.color = overview ? InactiveTextColor : ActiveTextColor;
+            if (overviewLabel != null)
+                overviewLabel.color = overview ? ActiveTextColor : InactiveTextColor;
         }
 
         private void BuildPanel()
@@ -373,10 +401,10 @@ namespace ChessRoyale
             rect.sizeDelta = new Vector2(640f, 200f);
             rect.localScale = Vector3.one * 0.001f;
 
-            // Segmented control: [ Immersive view | Bird's-eye view ]
+            // Segmented control: [ Immersive view | Overview view ]
             RectTransform track = CreateBox(transform, "Toggle", new Vector2(0f, 40f), new Vector2(640f, 104f), PanelColor);
-            CreateSegment(track, "Immersive view", new Vector2(-158f, 0f), ViewMode.Immersive, out immersiveBackground, out immersiveLabel);
-            CreateSegment(track, "Bird's-eye view", new Vector2(158f, 0f), ViewMode.BirdsEye, out birdsEyeBackground, out birdsEyeLabel);
+            CreateSegment(track, "IMMERSIVE", new Vector2(-158f, 0f), ViewMode.Immersive, out immersiveBackground, out immersiveLabel);
+            CreateSegment(track, "OVERVIEW", new Vector2(158f, 0f), ViewMode.Overview, out overviewBackground, out overviewLabel);
 
             RectTransform hint = CreateBox(transform, "Hint", new Vector2(0f, -60f), new Vector2(620f, 60f), HintColor);
             Text hintText = CreateText(hint, "Press Y on the left controller to switch view", 24, FontStyle.Normal);

@@ -32,6 +32,8 @@ namespace ChessRoyale.Networking
         [Networked] public int EnPassantSquareIndex { get; set; }
         [Networked] public int EnPassantPawnId { get; set; }
         [Networked] public int HalfmoveClock { get; set; }
+        [Networked] public byte LastWhiteMove { get; set; }
+        [Networked] public byte LastBlackMove { get; set; }
         [Networked] public int WhiteTimeMs { get; set; }
         [Networked] public int BlackTimeMs { get; set; }
         [Networked] public NetworkBool WhiteRematch { get; set; }
@@ -542,6 +544,8 @@ namespace ChessRoyale.Networking
             EnPassantSquareIndex = snapshot.EnPassantSquareIndex;
             EnPassantPawnId = snapshot.EnPassantPawnId;
             HalfmoveClock = snapshot.HalfmoveClock;
+            LastWhiteMove = snapshot.LastWhiteMove;
+            LastBlackMove = snapshot.LastBlackMove;
             if (snapshot.Pieces != null)
             {
                 int count = Mathf.Min(32, snapshot.Pieces.Length);
@@ -590,6 +594,8 @@ namespace ChessRoyale.Networking
                 EnPassantSquareIndex = (sbyte)EnPassantSquareIndex,
                 EnPassantPawnId = (sbyte)EnPassantPawnId,
                 HalfmoveClock = HalfmoveClock,
+                LastWhiteMove = LastWhiteMove,
+                LastBlackMove = LastBlackMove,
             };
             latestSnapshot = snapshot;
             return snapshot;
