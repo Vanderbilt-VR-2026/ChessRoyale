@@ -3,6 +3,7 @@ using System.Collections;
 using System.Linq;
 using System.Threading.Tasks;
 using Fusion;
+using Fusion.Sockets;
 using Photon.Voice.Fusion;
 using Photon.Voice.Unity;
 using Unity.XR.CoreUtils;
@@ -34,6 +35,11 @@ namespace ChessRoyale.Networking
         [Header("Seats")]
         [SerializeField] private Transform whiteSpawn;
         [SerializeField] private Transform blackSpawn;
+        [Tooltip("Each player stands on a raised podium behind their side. From floor height the 2 m back-rank " +
+                 "pieces hide the pawns behind them, so the controller ray can't reach them; from up here it can.")]
+        [Min(0f)] [SerializeField] private float podiumHeight = 2.4f;
+        [Tooltip("How far the podium sits in front of the spawn point, toward the board.")]
+        [Min(0f)] [SerializeField] private float podiumForwardShift = 1f;
 
         [Header("Reconnect")]
         [Tooltip("Seconds between attempts to rejoin after this headset loses its connection mid-match.")]
@@ -262,6 +268,12 @@ namespace ChessRoyale.Networking
             if (!IsReconnecting)
                 DisconnectNotice = null;
 
+            string action = createRoom ? "CREATE" : "JOIN";
+            Debug.Log(
+                $"[ChessFusion] {action} starting. RequestedSession='{roomCode}', GameMode=Shared, " +
+                $"AllowClientSessionCreation={createRoom}. {ChessFusionAppSettings.GetDiagnosticSummary()}",
+                this);
+
             NetworkRunner created = CreateRunner(roomCode);
             try
             {
@@ -296,7 +308,11 @@ namespace ChessRoyale.Networking
                 {
                     lastStartFailure = result.ShutdownReason;
                     LastError = DescribeStartFailure(createRoom, roomCode, result.ShutdownReason);
-                    Debug.LogError(LastError, this);
+                    Debug.LogError(
+                        $"[ChessFusion] {action} failed. RequestedSession='{roomCode}', " +
+                        $"ShutdownReason={result.ShutdownReason}. " +
+                        $"{ChessFusionAppSettings.GetDiagnosticSummary()} UserMessage='{LastError}'",
+                        this);
                     await CleanupFailedConnection(created);
                     return false;
                 }
@@ -320,15 +336,21 @@ namespace ChessRoyale.Networking
                 SpawnLobbyState();
                 SpawnLocalPlayer();
                 Debug.Log(
-                    $"Connected to Chess Royale Fusion Shared Mode room '{roomCode}' as " +
+                    $"[ChessFusion] {action} succeeded. RequestedSession='{roomCode}', " +
+                    $"ActualSession='{created.SessionInfo.Name}', Region='{created.SessionInfo.Region}', " +
+                    $"connected as " +
                     $"{(IsSharedModeMasterClient ? "master client" : "client")} " +
-                    $"({PlayerCount}/{MaximumPlayers}).",
+                    $"({PlayerCount}/{MaximumPlayers}). {ChessFusionAppSettings.GetDiagnosticSummary()}",
                     this);
                 return true;
             }
             catch (Exception exception)
             {
                 LastError = exception.Message;
+                Debug.LogError(
+                    $"[ChessFusion] {action} threw an exception. RequestedSession='{roomCode}', " +
+                    ChessFusionAppSettings.GetDiagnosticSummary(),
+                    this);
                 Debug.LogException(exception, this);
                 await CleanupFailedConnection(created);
                 return false;
@@ -366,6 +388,8 @@ namespace ChessRoyale.Networking
             events.PlayerJoined.AddListener(OnPlayerJoined);
             events.PlayerLeft.AddListener(OnPlayerLeft);
             events.OnSceneLoadDone.AddListener(OnSceneLoadDone);
+            events.OnConnectFailed.AddListener(OnConnectFailed);
+            events.OnDisconnectedFromServer.AddListener(OnDisconnectedFromServer);
             events.OnShutdown.AddListener(OnRunnerShutdown);
 
             SetUpVoice(created);
@@ -384,6 +408,8 @@ namespace ChessRoyale.Networking
             events.PlayerJoined.RemoveListener(OnPlayerJoined);
             events.PlayerLeft.RemoveListener(OnPlayerLeft);
             events.OnSceneLoadDone.RemoveListener(OnSceneLoadDone);
+            events.OnConnectFailed.RemoveListener(OnConnectFailed);
+            events.OnDisconnectedFromServer.RemoveListener(OnDisconnectedFromServer);
             events.OnShutdown.RemoveListener(OnRunnerShutdown);
         }
 
@@ -486,6 +512,24 @@ namespace ChessRoyale.Networking
             ChessFusionLobbyState.Instance?.RefreshAssignments();
             if (player == callbackRunner.LocalPlayer)
                 SpawnLocalPlayer();
+        }
+
+        private void OnConnectFailed(NetworkRunner callbackRunner, NetAddress remoteAddress, NetConnectFailedReason reason)
+        {
+            Debug.LogError(
+                $"[ChessFusion] Connection failed. Runner='{callbackRunner?.name}', " +
+                $"RemoteAddress='{remoteAddress}', Reason={reason}. " +
+                ChessFusionAppSettings.GetDiagnosticSummary(),
+                this);
+        }
+
+        private void OnDisconnectedFromServer(NetworkRunner callbackRunner, NetDisconnectReason reason)
+        {
+            Debug.LogWarning(
+                $"[ChessFusion] Disconnected from server. Session='{CurrentRoomCode ?? "<not-established>"}', " +
+                $"Reason={reason}. " +
+                ChessFusionAppSettings.GetDiagnosticSummary(),
+                this);
         }
 
         private void OnPlayerLeft(NetworkRunner callbackRunner, PlayerRef player)
@@ -716,9 +760,57 @@ namespace ChessRoyale.Networking
             }
 
             GetSpawnPose(white, out Vector3 position, out Quaternion rotation);
+            position = RaiseOntoPodium(white, position, rotation);
+            // Build the opponent's podium too, so their avatar is seen standing on it, not floating.
+            GetSpawnPose(!white, out Vector3 otherPosition, out Quaternion otherRotation);
+            RaiseOntoPodium(!white, otherPosition, otherRotation);
             EnsureGroundUnder(position);
             PlaceRig(origin, position, rotation);
             return origin;
+        }
+
+        // The pieces are human-sized: back-rank pieces are 1.65-2.35 m tall and pawns 1.45 m, two
+        // metres behind them. Standing at floor level behind the board, a controller ray at about
+        // 1.8 m runs straight into the back rank, so the pawns can't be targeted at all. Standing on a
+        // podium puts the ray above the back rank, angled down onto every piece.
+        private Vector3 RaiseOntoPodium(bool white, Vector3 spawnPosition, Quaternion rotation)
+        {
+            if (podiumHeight <= 0f)
+                return spawnPosition;
+
+            Vector3 forward = rotation * Vector3.forward;
+            forward.y = 0f;
+            forward = forward.sqrMagnitude > 0.0001f ? forward.normalized : Vector3.forward;
+
+            Vector3 seat = spawnPosition + forward * podiumForwardShift;
+            float top = spawnPosition.y + podiumHeight;
+            EnsurePodium(white ? "White Seat Podium (generated)" : "Black Seat Podium (generated)", seat, top, rotation);
+            return new Vector3(seat.x, top, seat.z);
+        }
+
+        private static void EnsurePodium(string podiumName, Vector3 seat, float top, Quaternion rotation)
+        {
+            if (GameObject.Find(podiumName) != null)
+                return;
+
+            // Stand the podium on whatever is below (a dais step or the hall floor).
+            float bottom = seat.y - 1f;
+            if (Physics.Raycast(new Vector3(seat.x, top + 0.5f, seat.z), Vector3.down, out RaycastHit hit, top + 5f, ~0, QueryTriggerInteraction.Ignore))
+                bottom = Mathf.Min(hit.point.y, seat.y);
+
+            GameObject podium = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            podium.name = podiumName;
+            float height = Mathf.Max(0.1f, top - bottom);
+            podium.transform.SetPositionAndRotation(new Vector3(seat.x, bottom + height * 0.5f, seat.z), rotation);
+            podium.transform.localScale = new Vector3(2.2f, height, 1.6f);
+
+            // Match the dais stone if the hall has it.
+            GameObject dais = GameObject.Find("Dais Step 3");
+            Renderer daisRenderer = dais != null ? dais.GetComponent<Renderer>() : null;
+            if (daisRenderer != null)
+                podium.GetComponent<Renderer>().sharedMaterial = daisRenderer.sharedMaterial;
+
+            Physics.SyncTransforms();
         }
 
         // The seats are past the ends of the board, where the only collider in the hall (the board's

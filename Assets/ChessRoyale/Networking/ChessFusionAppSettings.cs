@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Fusion.Photon.Realtime;
 using UnityEngine;
 
@@ -30,6 +32,35 @@ namespace ChessRoyale.Networking
                 return false;
 
             return !string.IsNullOrWhiteSpace(settings.AppSettings.AppIdVoice);
+        }
+
+        // Safe to include in device logs: the raw Photon App ID is never returned.
+        // The short fingerprint lets two builds prove they use the same App ID without exposing it.
+        public static string GetDiagnosticSummary()
+        {
+            if (!PhotonAppSettings.TryGetGlobal(out PhotonAppSettings settings) || settings == null)
+                return $"PhotonSettings=missing, UnityVersion='{Application.version}', Platform={Application.platform}";
+
+            Photon.Realtime.AppSettings app = settings.AppSettings;
+            string appVersion = string.IsNullOrWhiteSpace(app.AppVersion) ? "<default>" : app.AppVersion;
+            string fixedRegion = string.IsNullOrWhiteSpace(app.FixedRegion) ? "<best-region>" : app.FixedRegion;
+            return $"AppIdFingerprint={Fingerprint(app.AppIdFusion)}, AppVersion='{appVersion}', " +
+                   $"FixedRegion='{fixedRegion}', UnityVersion='{Application.version}', Platform={Application.platform}";
+        }
+
+        private static string Fingerprint(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "<missing>";
+
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(value.Trim()));
+                StringBuilder result = new StringBuilder(12);
+                for (int i = 0; i < 6; i++)
+                    result.Append(hash[i].ToString("x2"));
+                return result.ToString();
+            }
         }
 
         public static bool TryValidate(Object context, out string error)

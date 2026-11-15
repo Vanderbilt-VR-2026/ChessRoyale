@@ -56,7 +56,7 @@ public class MainMenu : MonoBehaviour
         rect.anchoredPosition = Vector2.zero;
 
         Image background = root.AddComponent<Image>();
-        background.color = new Color(0.05f, 0.05f, 0.07f, 0.96f);
+        background.color = new Color(0.12f, 0.035f, 0.03f, 0.98f);
 
         Text message = CreateText(rect, "Message", new Vector2(0f, 70f), new Vector2(680f, 200f), 36);
         message.text = "Connect to the internet\nto play multiplayer.";
@@ -67,12 +67,13 @@ public class MainMenu : MonoBehaviour
         buttonRect.sizeDelta = new Vector2(280f, 80f);
         buttonRect.anchoredPosition = new Vector2(0f, -120f);
         Image buttonImage = buttonObject.AddComponent<Image>();
-        buttonImage.color = new Color(0.1f, 0.28f, 0.55f, 1f);
+        buttonImage.color = new Color(0.34f, 0.07f, 0.08f, 1f);
         Button button = buttonObject.AddComponent<Button>();
         button.targetGraphic = buttonImage;
         button.onClick.AddListener(HideOfflineNotice);
         CreateText(buttonRect, "OK Label", Vector2.zero, new Vector2(280f, 80f), 32).text = "OK";
 
+        ChessRoyale.ChessUITheme.ApplyPanel(root);
         return root;
     }
 
@@ -88,7 +89,7 @@ public class MainMenu : MonoBehaviour
         text.fontSize = fontSize;
         text.fontStyle = FontStyle.Bold;
         text.alignment = TextAnchor.MiddleCenter;
-        text.color = Color.white;
+        text.color = new Color(0.96f, 0.90f, 0.77f);
         text.raycastTarget = false;
         return text;
     }

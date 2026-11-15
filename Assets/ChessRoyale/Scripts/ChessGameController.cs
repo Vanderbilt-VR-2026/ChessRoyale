@@ -70,6 +70,33 @@ namespace ChessRoyale
 
         private static bool IsSinglePlayer => !MainMenu.LaunchMultiplayer;
 
+        private byte lastWhiteMove;
+        private byte lastBlackMove;
+
+        private void MarkLastMove(ChessPieceInteractable piece)
+        {
+            if (piece.PieceColor == ChessPieceColor.White)
+                lastWhiteMove = (byte)(piece.PieceId + 1);
+            else
+                lastBlackMove = (byte)(piece.PieceId + 1);
+            RefreshLastMoveOutlines();
+        }
+
+        private void RefreshLastMoveOutlines()
+        {
+            foreach (ChessPieceInteractable piece in pieces)
+            {
+                bool highlighted = !piece.IsCaptured &&
+                    ((piece.PieceColor == ChessPieceColor.White && lastWhiteMove == piece.PieceId + 1) ||
+                     (piece.PieceColor == ChessPieceColor.Black && lastBlackMove == piece.PieceId + 1));
+                ChessLastMoveOutline outline = piece.GetComponent<ChessLastMoveOutline>();
+                if (highlighted && outline == null)
+                    outline = piece.gameObject.AddComponent<ChessLastMoveOutline>();
+                if (outline != null)
+                    outline.SetRecentMove(highlighted);
+            }
+        }
+
         public event System.Action GameReset;
         public event System.Action<ChessPieceType> PromotionRequested;
         public event System.Action RematchRequested;
@@ -228,6 +255,7 @@ namespace ChessRoyale
             board.Remove(origin);
             board[destination] = piece;
             piece.MoveToSquare(destination);
+            MarkLastMove(piece);
 
             if (piece.PieceType == ChessPieceType.King && Mathf.Abs(destination.FileIndex - origin.FileIndex) == 2)
                 MoveCastlingRook(piece, origin, destination);
@@ -401,6 +429,8 @@ namespace ChessRoyale
                 EnPassantSquareIndex = EnPassantSquareIndex,
                 EnPassantPawnId = EnPassantPawnId,
                 HalfmoveClock = halfmoveClock,
+                LastWhiteMove = lastWhiteMove,
+                LastBlackMove = lastBlackMove,
             };
         }
 
@@ -428,6 +458,9 @@ namespace ChessRoyale
                     board[square] = piece;
             }
 
+            lastWhiteMove = snapshot.LastWhiteMove;
+            lastBlackMove = snapshot.LastBlackMove;
+            RefreshLastMoveOutlines();
             activeColor = snapshot.ActiveColor;
             outcome = snapshot.Outcome;
             statusMessage = string.IsNullOrEmpty(snapshot.StatusMessage)
@@ -454,6 +487,8 @@ namespace ChessRoyale
 
         public void ResetGame()
         {
+            lastWhiteMove = lastBlackMove = 0;
+            RefreshLastMoveOutlines();
             ClearMoveHints();
             ClearCheckSignal();
             board.Clear();
@@ -1023,6 +1058,7 @@ namespace ChessRoyale
                 // World-space UI is read from its local -Z side; +Z points away from the player.
                 promotionPanel.transform.rotation = Quaternion.LookRotation(promotionPanel.transform.position - camera.transform.position, Vector3.up);
             }
+            ChessUITheme.ApplyPanel(promotionPanel);
             promotionPanel.SetActive(true);
         }
 

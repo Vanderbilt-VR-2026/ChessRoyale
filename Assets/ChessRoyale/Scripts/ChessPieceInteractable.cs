@@ -33,6 +33,7 @@ namespace ChessRoyale
         [SerializeField] private ChessPieceType pieceType;
         [SerializeField] private ChessBoardSquare currentSquare;
         [SerializeField] private bool hasMoved;
+        [SerializeField, Min(0f)] private float maximumHeldLift = 1f;
 
         private XRGrabInteractable grabInteractable;
         private Rigidbody body;
@@ -84,6 +85,17 @@ namespace ChessRoyale
             body.useGravity = false;
             body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
             body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+            // Apply board limits to XR's target pose, including its before-render update.
+            grabInteractable.addDefaultGrabTransformers = false;
+            ChessPieceGrabTransformer transformer = GetComponent<ChessPieceGrabTransformer>();
+            if (transformer == null)
+                transformer = gameObject.AddComponent<ChessPieceGrabTransformer>();
+            grabInteractable.AddSingleGrabTransformer(transformer);
+            grabInteractable.AddMultipleGrabTransformer(transformer);
+            grabInteractable.movementType = XRBaseInteractable.MovementType.Instantaneous;
+            grabInteractable.attachEaseInTime = 0.03f;
+            grabInteractable.smoothPosition = false;
+            UpdateColliderToVisibleModel();
             grabInteractable.trackRotation = false;
             grabInteractable.throwOnDetach = false;
         }
@@ -101,6 +113,8 @@ namespace ChessRoyale
             ActivePieces.Add(this);
             grabInteractable.selectEntered.AddListener(OnGrabbed);
             grabInteractable.selectExited.AddListener(OnReleased);
+            grabInteractable.hoverEntered.AddListener(OnHoverEntered);
+            grabInteractable.hoverExited.AddListener(OnHoverExited);
         }
 
         private void OnDisable()
@@ -110,6 +124,9 @@ namespace ChessRoyale
             ActivePieces.Remove(this);
             grabInteractable.selectEntered.RemoveListener(OnGrabbed);
             grabInteractable.selectExited.RemoveListener(OnReleased);
+            grabInteractable.hoverEntered.RemoveListener(OnHoverEntered);
+            grabInteractable.hoverExited.RemoveListener(OnHoverExited);
+            GetComponent<ChessLastMoveOutline>()?.SetTargeted(false);
         }
 
         private void OnDestroy()
@@ -172,8 +189,20 @@ namespace ChessRoyale
             boardSettlementPending = false;
         }
 
+        private void OnHoverEntered(HoverEnterEventArgs args) => SetTargetOutline(true);
+        private void OnHoverExited(HoverExitEventArgs args) => SetTargetOutline(grabInteractable.isHovered || grabInteractable.isSelected);
+
+        private void SetTargetOutline(bool targeted)
+        {
+            ChessLastMoveOutline outline = GetComponent<ChessLastMoveOutline>();
+            if (targeted && outline == null)
+                outline = gameObject.AddComponent<ChessLastMoveOutline>();
+            outline?.SetTargeted(targeted);
+        }
+
         private void OnGrabbed(SelectEnterEventArgs _)
         {
+            SetTargetOutline(true);
             grabOriginSquare = currentSquare;
             holdDropPresentation = false;
             hasBoardBounds = ChessBoardSquare.TryGetBoardBounds(out boardBounds);
@@ -189,6 +218,7 @@ namespace ChessRoyale
 
         private void OnReleased(SelectExitEventArgs args)
         {
+            SetTargetOutline(grabInteractable.isHovered);
             if (args.isCanceled)
             {
                 moveAllowed = false;
@@ -198,6 +228,7 @@ namespace ChessRoyale
                 return;
             }
 
+            ConfineToBoard();
             ChessBoardSquare destination = ChessBoardSquare.FindClosest(transform.position, MaximumSquareDropDistance);
             ChessNetworkMoveCoordinator coordinator = ChessNetworkMoveCoordinator.Instance;
             if (coordinator != null && coordinator.IsOnline)
@@ -249,16 +280,33 @@ namespace ChessRoyale
             ChessAudio.PlayAt(ChessSfx.Invalid, transform.position);
         }
 
-        // A held piece follows the hand, but never leaves the board footprint or sinks below board level;
-        // only capture removes it.
+        // Share the same limits between XR target calculation and release processing.
+        internal Vector3 ConstrainHeldPosition(Vector3 position)
+        {
+            if (!hasBoardBounds)
+                hasBoardBounds = ChessBoardSquare.TryGetBoardBounds(out boardBounds);
+            if (!hasBoardBounds)
+            {
+                ChessBoardSquare fallbackSquare = grabOriginSquare ?? currentSquare ?? startingSquare;
+                return fallbackSquare != null ? GetRestingPosition(fallbackSquare) : startingPosition;
+            }
+
+            float boardHeight = boardBounds.max.y + baseOffset;
+            if (!float.IsFinite(position.x) || !float.IsFinite(position.y) || !float.IsFinite(position.z))
+            {
+                ChessBoardSquare fallback = grabOriginSquare ?? currentSquare ?? startingSquare;
+                position = fallback != null ? GetRestingPosition(fallback) : startingPosition;
+            }
+            return new Vector3(
+                Mathf.Clamp(position.x, boardBounds.min.x, boardBounds.max.x),
+                Mathf.Clamp(position.y, boardHeight, boardHeight + maximumHeldLift),
+                Mathf.Clamp(position.z, boardBounds.min.z, boardBounds.max.z));
+        }
+
         private void ConfineToBoard()
         {
-            Vector3 position = transform.position;
-            Vector3 confined = new Vector3(
-                Mathf.Clamp(position.x, boardBounds.min.x, boardBounds.max.x),
-                Mathf.Max(position.y, boardBounds.max.y + baseOffset),
-                Mathf.Clamp(position.z, boardBounds.min.z, boardBounds.max.z));
-            if (confined == position)
+            Vector3 confined = ConstrainHeldPosition(transform.position);
+            if (confined == transform.position)
                 return;
 
             transform.position = confined;
@@ -528,7 +576,7 @@ namespace ChessRoyale
             float scale = Mathf.Max(0.0001f, transform.lossyScale.x);
             capsule.center = transform.InverseTransformPoint(bounds.center);
             capsule.height = bounds.size.y / scale;
-            capsule.radius = Mathf.Max(bounds.size.x, bounds.size.z) * 0.42f / scale;
+            capsule.radius = Mathf.Max(bounds.size.x, bounds.size.z) * 0.52f / scale;
         }
 
         private float CalculateBaseOffset()

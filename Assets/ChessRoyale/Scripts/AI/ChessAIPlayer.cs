@@ -30,6 +30,7 @@ namespace ChessRoyale.AI
         private float turnStartedAt;
         private ChessPieceColor lastActiveColor;
         private float gameOverAt = -1f;
+        private ChessGameOutcome pendingResult = ChessGameOutcome.InProgress;
         private bool rigPoseSaved;
         private Vector3 rigStartPosition;
         private Quaternion rigStartRotation;
@@ -63,6 +64,8 @@ namespace ChessRoyale.AI
             if (Instance == this)
                 Instance = null;
             engine?.Cancel();
+            if (panel != null)
+                Destroy(panel.gameObject);
             ChessSinglePlayerSettings.GameStarted = false;
         }
 
@@ -76,6 +79,10 @@ namespace ChessRoyale.AI
         // Called by the setup panel. colorChoice: 0 = White, 1 = Black, 2 = Random.
         public void StartGame(int colorChoice, ChessAIDifficulty difficulty)
         {
+            // Ignore queued/double clicks after the setup UI has been hidden.
+            if (panel == null || !panel.IsVisible || ChessSinglePlayerSettings.GameStarted)
+                return;
+
             ChessSinglePlayerSettings.SavedColorChoice = colorChoice;
             ChessSinglePlayerSettings.SavedDifficulty = difficulty;
 
@@ -92,6 +99,14 @@ namespace ChessRoyale.AI
             Debug.Log($"Chess Royale single player: you are {ChessSinglePlayerSettings.HumanColor}, computer is {difficulty}.");
         }
 
+        public void ReplayGame()
+        {
+            if (panel == null || !panel.IsShowingResult || ChessSinglePlayerSettings.GameStarted)
+                return;
+
+            StartGame(ChessSinglePlayerSettings.SavedColorChoice, ChessSinglePlayerSettings.SavedDifficulty);
+        }
+
         public void ReturnToMainMenu()
         {
             engine.Cancel();
@@ -104,6 +119,9 @@ namespace ChessRoyale.AI
             generation++;
             engine.Cancel();
             gameOverAt = -1f;
+            pendingResult = ChessGameOutcome.InProgress;
+            if (ChessSinglePlayerSettings.GameStarted && panel != null)
+                panel.Hide();
             turnStartedAt = Time.time;
             lastActiveColor = game.ActiveColor;
         }
@@ -117,6 +135,15 @@ namespace ChessRoyale.AI
             {
                 ShowResultWhenReady();
                 return;
+            }
+
+            // A result must remain unchanged for the full delay before showing setup again.
+            gameOverAt = -1f;
+            pendingResult = ChessGameOutcome.InProgress;
+            if (panel != null && panel.IsVisible)
+            {
+                Debug.LogWarning("Chess Royale: hid unexpected setup panel during an active single-player game.");
+                panel.Hide();
             }
 
             if (game.ActiveColor != lastActiveColor)
@@ -175,8 +202,10 @@ namespace ChessRoyale.AI
 
         private void ShowResultWhenReady()
         {
-            if (gameOverAt < 0f)
+            if (gameOverAt < 0f || pendingResult != game.Outcome)
             {
+                pendingResult = game.Outcome;
+                Debug.Log($"Chess Royale single-player result pending: {pendingResult}; {game.StatusMessage}.");
                 gameOverAt = Time.time;
                 return;
             }
@@ -184,33 +213,10 @@ namespace ChessRoyale.AI
             if (Time.time - gameOverAt < ResultPanelDelaySeconds || panel == null || panel.IsVisible)
                 return;
 
+            Debug.Log($"Chess Royale: showing single-player match result after {pendingResult}; {game.StatusMessage}.");
             ChessSinglePlayerSettings.GameStarted = false;
-            panel.Show(DescribeResult());
+            panel.ShowResult(game.Outcome, ChessSinglePlayerSettings.HumanColor);
             game.RefreshLocalControls();
-        }
-
-        private string DescribeResult()
-        {
-            ChessPieceColor? winner = null;
-            switch (game.Outcome)
-            {
-                case ChessGameOutcome.WhiteCheckmates:
-                case ChessGameOutcome.WhiteWinsOnTime:
-                case ChessGameOutcome.WhiteWinsByDisconnect:
-                    winner = ChessPieceColor.White;
-                    break;
-                case ChessGameOutcome.BlackCheckmates:
-                case ChessGameOutcome.BlackWinsOnTime:
-                case ChessGameOutcome.BlackWinsByDisconnect:
-                    winner = ChessPieceColor.Black;
-                    break;
-            }
-
-            if (winner == null)
-                return $"Draw. {game.StatusMessage}.";
-            return winner == ChessSinglePlayerSettings.HumanColor
-                ? $"You win! {game.StatusMessage}."
-                : $"The computer wins. {game.StatusMessage}.";
         }
 
         // Playing Black means looking at the board from the other side: turn the rig around the board's center.

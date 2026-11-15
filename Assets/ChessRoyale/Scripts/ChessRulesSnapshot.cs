@@ -20,6 +20,9 @@ namespace ChessRoyale
         public sbyte EnPassantSquareIndex;
         public sbyte EnPassantPawnId;
         public int HalfmoveClock;
+        // Zero means none; otherwise stable piece ID + 1 (safe for default snapshots).
+        public byte LastWhiteMove;
+        public byte LastBlackMove;
     }
 
     public static class ChessSquareIndex
