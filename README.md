@@ -53,7 +53,8 @@ The project includes the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyale
 
 ## HomePage Redesign
 
-![Uploading d9819a1ce22f0cd904ca1007c03aca3a.png…]()
+<img width="1672" height="941" alt="d9819a1ce22f0cd904ca1007c03aca3a" src="https://github.com/user-attachments/assets/8fd9585d-ddc3-4d79-b748-6e8fcb118edf" />
+
 
 ## Single player: playing the computer
 
