@@ -51,6 +51,8 @@ The game includes:
 
 The project includes the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyaleVR.unity`, with board teleportation and networked play. Background music and sound effects are included (see [Audio](#audio)).
 
+## HomePage Redesign
+
 ## Single player: playing the computer
 
 Choosing **Single Player** opens a setup panel in front of you:
