@@ -1,3 +1,7 @@
+Here are the demo videos:
+https://drive.google.com/file/d/1Z7i7TYAXU6NCSvZC5HGetwxbaavaemxO/view?usp=drive_link
+https://drive.google.com/file/d/1o4M4E3LTBNJWkatZP0fR8uSeg0Yhp6nL/view?usp=drive_link
+
 # Chess Royale
 
 Chess Royale is a Meta Quest chess game. Two people share one hall and one giant board, or one person plays both sides.
@@ -216,3 +220,4 @@ Claude was also used as a step-by-step guide for configuring the XR Interaction 
 Claude was used to help restructure the Photon Fusion networking to follow the class tutorial (network manager and runner prefab, master-client game state, avatars, voice, reconnect) and to review it for bugs; the team configured, built, and tested it on Meta Quest headsets.
 
 Claude was used to help write the `ChessAudio` sound system and to draft the product-sense section above; the audio was chosen, placed, and tested by the team, and the product-sense recommendations were reviewed and edited by the team.
+
