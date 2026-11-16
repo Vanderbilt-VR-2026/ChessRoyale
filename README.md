@@ -53,6 +53,8 @@ The project includes the VR main menu and `Assets/ChessRoyale/Scenes/ChessRoyale
 
 ## HomePage Redesign
 
+![Uploading d9819a1ce22f0cd904ca1007c03aca3a.png…]()
+
 ## Single player: playing the computer
 
 Choosing **Single Player** opens a setup panel in front of you:
