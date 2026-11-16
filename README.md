@@ -1,6 +1,6 @@
 Here are the demo videos:
-https://drive.google.com/file/d/1Z7i7TYAXU6NCSvZC5HGetwxbaavaemxO/view?usp=drive_link
 
+https://drive.google.com/file/d/1Z7i7TYAXU6NCSvZC5HGetwxbaavaemxO/view?usp=drive_link
 https://drive.google.com/file/d/1o4M4E3LTBNJWkatZP0fR8uSeg0Yhp6nL/view?usp=drive_link
 
 # Chess Royale
@@ -78,11 +78,13 @@ In VR, the default player view looks at the board from one side at an angle. Pie
 
 **Player view (default).** The normal seated view of the board. A toggle bar at the bottom shows which view is active, with a hint to press **Y** on the left controller to switch.
 
-![Player view with the view toggle at the bottom](docs/images/birds-eye/player-view.png)
+<img width="1280" height="720" alt="ad38e130d669255d18a67437158c471d" src="https://github.com/user-attachments/assets/5a9a5189-8558-485e-b539-1e4e2d4d6a49" />
+
 
 **Bird's-eye view.** The camera sits directly above the board. All 64 squares and every piece are visible, with file (a–h) and rank (1–8) labels around the edge. Players can still pick up and move pieces in this view. Pressing **Y** again returns to the player view.
 
-![Bird's-eye view of the full board from above](docs/images/birds-eye/birds-eye-view.png)
+<img width="1280" height="720" alt="0da2c4c0153307667b80fb8cdbfcacfa" src="https://github.com/user-attachments/assets/67d42cde-30c4-4c8f-b1a8-ff5808435545" />
+
 
 **Planned behaviour:**
 
