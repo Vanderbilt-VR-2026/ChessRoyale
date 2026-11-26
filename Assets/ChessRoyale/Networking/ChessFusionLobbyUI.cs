@@ -45,14 +45,20 @@ namespace ChessRoyale.Networking
         private Button whiteChoiceButton;
         private Button randomChoiceButton;
         private Button blackChoiceButton;
+        private Button createRoomButton;
+        private Button configureBackButton;
         private Button standardButton;
         private Button chess960Button;
+        private Button classicButton;
+        private Button chaosButton;
         private Button threeCheckOffButton;
         private Button threeCheckOnButton;
         private Button arenaOffButton;
         private Button arenaOnButton;
         private Button readyButton;
+        private GameObject classicSettingsRoot;
         private ChessSeatPreference creatorSeatPreference = ChessSeatPreference.Random;
+        private ChessGameplayMode pendingGameplayMode = ChessGameplayMode.TurnBased;
         private ChessStartingLayout pendingStartingLayout = ChessStartingLayout.Standard;
         private bool pendingThreeCheck;
         private bool pendingPodiumOverview = true;
@@ -286,16 +292,19 @@ namespace ChessRoyale.Networking
                 case ChessRoyale.ChessGameOutcome.WhiteWinsOnTime:
                 case ChessRoyale.ChessGameOutcome.WhiteWinsByDisconnect:
                 case ChessRoyale.ChessGameOutcome.WhiteWinsByThreeCheck:
+                case ChessRoyale.ChessGameOutcome.WhiteWinsByKingCapture:
                     return local == ChessRoyale.ChessPieceColor.White ? "YOU WIN" : "YOU LOSE";
                 case ChessRoyale.ChessGameOutcome.BlackCheckmates:
                 case ChessRoyale.ChessGameOutcome.BlackWinsOnTime:
                 case ChessRoyale.ChessGameOutcome.BlackWinsByDisconnect:
                 case ChessRoyale.ChessGameOutcome.BlackWinsByThreeCheck:
+                case ChessRoyale.ChessGameOutcome.BlackWinsByKingCapture:
                     return local == ChessRoyale.ChessPieceColor.Black ? "YOU WIN" : "YOU LOSE";
                 case ChessRoyale.ChessGameOutcome.Stalemate:
                 case ChessRoyale.ChessGameOutcome.DrawInsufficientMaterial:
                 case ChessRoyale.ChessGameOutcome.DrawThreefoldRepetition:
                 case ChessRoyale.ChessGameOutcome.DrawFiftyMoveRule:
+                case ChessRoyale.ChessGameOutcome.DrawMutualKingCapture:
                     return "DRAW";
                 default:
                     return "GAME OVER";
@@ -336,10 +345,7 @@ namespace ChessRoyale.Networking
                 createStatusText.text = "Creating the room...";
             ApplyScreen();
 
-            ChessMatchConfig config = ChessMatchConfig.Default;
-            config.StartingLayout = (byte)pendingStartingLayout;
-            config.ThreeCheckEnabled = pendingThreeCheck;
-            config.PodiumOverviewEnabled = pendingPodiumOverview;
+            ChessMatchConfig config = BuildPendingConfiguration();
             bool created = await room.CreateRoom(code, creatorSeatPreference, config);
             if (this == null || generation != flowGeneration)
                 return;
@@ -406,6 +412,18 @@ namespace ChessRoyale.Networking
         public void ChooseStandard()
         {
             pendingStartingLayout = ChessStartingLayout.Standard;
+            RefreshConfigurationChoices();
+        }
+
+        public void ChooseClassic()
+        {
+            pendingGameplayMode = ChessGameplayMode.TurnBased;
+            RefreshConfigurationChoices();
+        }
+
+        public void ChooseChaos()
+        {
+            pendingGameplayMode = ChessGameplayMode.Chaos;
             RefreshConfigurationChoices();
         }
 
@@ -482,6 +500,11 @@ namespace ChessRoyale.Networking
         private void RefreshConfigurationChoices()
         {
             RefreshColorChoice();
+            SetChoiceButtonColor(classicButton, pendingGameplayMode == ChessGameplayMode.TurnBased);
+            SetChoiceButtonColor(chaosButton, pendingGameplayMode == ChessGameplayMode.Chaos);
+            if (classicSettingsRoot != null)
+                classicSettingsRoot.SetActive(pendingGameplayMode == ChessGameplayMode.TurnBased);
+            RefreshConfigureLayout();
             SetChoiceButtonColor(standardButton, pendingStartingLayout == ChessStartingLayout.Standard);
             SetChoiceButtonColor(chess960Button, pendingStartingLayout == ChessStartingLayout.Chess960);
             SetChoiceButtonColor(threeCheckOffButton, !pendingThreeCheck);
@@ -490,12 +513,48 @@ namespace ChessRoyale.Networking
             SetChoiceButtonColor(arenaOnButton, pendingPodiumOverview);
             if (configureSummaryText != null)
             {
-                ChessMatchConfig config = ChessMatchConfig.Default;
-                config.StartingLayout = (byte)pendingStartingLayout;
-                config.ThreeCheckEnabled = pendingThreeCheck;
-                config.PodiumOverviewEnabled = pendingPodiumOverview;
-                configureSummaryText.text = config.Summary;
+                configureSummaryText.text = BuildPendingConfiguration().Summary;
             }
+        }
+
+        private void RefreshConfigureLayout()
+        {
+            bool chaos = pendingGameplayMode == ChessGameplayMode.Chaos;
+            float colorLabelY = chaos ? 235f : -95f;
+            float colorButtonsY = chaos ? 180f : -145f;
+            float summaryY = chaos ? 65f : -245f;
+            float createY = chaos ? -55f : -355f;
+            float backY = chaos ? -145f : -445f;
+
+            SetAnchoredY(colorChoiceText, colorLabelY);
+            SetAnchoredY(whiteChoiceButton, colorButtonsY);
+            SetAnchoredY(randomChoiceButton, colorButtonsY);
+            SetAnchoredY(blackChoiceButton, colorButtonsY);
+            SetAnchoredY(configureSummaryText, summaryY);
+            SetAnchoredY(createRoomButton, createY);
+            SetAnchoredY(configureBackButton, backY);
+        }
+
+        private static void SetAnchoredY(Component component, float y)
+        {
+            if (component == null || component.transform is not RectTransform rect)
+                return;
+
+            Vector2 position = rect.anchoredPosition;
+            position.y = y;
+            rect.anchoredPosition = position;
+        }
+
+        private ChessMatchConfig BuildPendingConfiguration()
+        {
+            if (pendingGameplayMode == ChessGameplayMode.Chaos)
+                return ChessMatchConfig.Chaos;
+
+            ChessMatchConfig config = ChessMatchConfig.Default;
+            config.StartingLayout = (byte)pendingStartingLayout;
+            config.ThreeCheckEnabled = pendingThreeCheck;
+            config.PodiumOverviewEnabled = pendingPodiumOverview;
+            return config;
         }
 
         private static void SetChoiceButtonColor(Button button, bool selected)
@@ -712,22 +771,34 @@ namespace ChessRoyale.Networking
 
             configureRoot = CreatePage("Configure");
             CreateText(configureRoot.transform, "CREATE MATCH", new Vector2(0f, 455f), new Vector2(860f, 70f), 42);
-            CreateText(configureRoot.transform, "STARTING LAYOUT", new Vector2(0f, 370f), new Vector2(860f, 50f), 24);
-            standardButton = CreateButton(configureRoot.transform, "STANDARD", new Vector2(-155f, 310f), ChooseStandard, new Vector2(280f, 68f));
-            chess960Button = CreateButton(configureRoot.transform, "CHESS960", new Vector2(155f, 310f), ChooseChess960, new Vector2(280f, 68f));
-            CreateText(configureRoot.transform, "THREE-CHECK", new Vector2(0f, 230f), new Vector2(860f, 50f), 24);
-            threeCheckOffButton = CreateButton(configureRoot.transform, "OFF", new Vector2(-155f, 170f), DisableThreeCheck, new Vector2(280f, 68f));
-            threeCheckOnButton = CreateButton(configureRoot.transform, "ON", new Vector2(155f, 170f), EnableThreeCheck, new Vector2(280f, 68f));
-            CreateText(configureRoot.transform, "PODIUM + OVERVIEW", new Vector2(0f, 90f), new Vector2(860f, 50f), 24);
-            arenaOffButton = CreateButton(configureRoot.transform, "OFF", new Vector2(-155f, 30f), DisablePodiumOverview, new Vector2(280f, 68f));
-            arenaOnButton = CreateButton(configureRoot.transform, "ON", new Vector2(155f, 30f), EnablePodiumOverview, new Vector2(280f, 68f));
-            colorChoiceText = CreateText(configureRoot.transform, "YOUR COLOR: RANDOM", new Vector2(0f, -65f), new Vector2(860f, 50f), 24);
-            whiteChoiceButton = CreateButton(configureRoot.transform, "WHITE", new Vector2(-285f, -125f), ChooseWhite, new Vector2(240f, 68f));
-            randomChoiceButton = CreateButton(configureRoot.transform, "RANDOM", new Vector2(0f, -125f), ChooseRandom, new Vector2(240f, 68f));
-            blackChoiceButton = CreateButton(configureRoot.transform, "BLACK", new Vector2(285f, -125f), ChooseBlack, new Vector2(240f, 68f));
-            configureSummaryText = CreateText(configureRoot.transform, string.Empty, new Vector2(0f, -225f), new Vector2(860f, 90f), 23);
-            CreateButton(configureRoot.transform, "CREATE ROOM", new Vector2(0f, -345f), BeginCreate, new Vector2(460f, 72f));
-            CreateButton(configureRoot.transform, "BACK", new Vector2(0f, -445f), ShowChoose, new Vector2(360f, 68f));
+            CreateText(configureRoot.transform, "GAME MODE", new Vector2(0f, 390f), new Vector2(860f, 46f), 24);
+            classicButton = CreateButton(configureRoot.transform, "CLASSIC", new Vector2(-155f, 335f), ChooseClassic, new Vector2(280f, 62f));
+            chaosButton = CreateButton(configureRoot.transform, "CHAOS", new Vector2(155f, 335f), ChooseChaos, new Vector2(280f, 62f));
+
+            classicSettingsRoot = new GameObject("Classic Settings", typeof(RectTransform));
+            classicSettingsRoot.transform.SetParent(configureRoot.transform, false);
+            RectTransform classicRect = classicSettingsRoot.GetComponent<RectTransform>();
+            classicRect.anchorMin = Vector2.zero;
+            classicRect.anchorMax = Vector2.one;
+            classicRect.offsetMin = Vector2.zero;
+            classicRect.offsetMax = Vector2.zero;
+            CreateText(classicSettingsRoot.transform, "STARTING LAYOUT", new Vector2(0f, 275f), new Vector2(860f, 42f), 22);
+            standardButton = CreateButton(classicSettingsRoot.transform, "STANDARD", new Vector2(-155f, 225f), ChooseStandard, new Vector2(280f, 58f));
+            chess960Button = CreateButton(classicSettingsRoot.transform, "CHESS960", new Vector2(155f, 225f), ChooseChess960, new Vector2(280f, 58f));
+            CreateText(classicSettingsRoot.transform, "THREE-CHECK", new Vector2(0f, 160f), new Vector2(860f, 42f), 22);
+            threeCheckOffButton = CreateButton(classicSettingsRoot.transform, "OFF", new Vector2(-155f, 110f), DisableThreeCheck, new Vector2(280f, 58f));
+            threeCheckOnButton = CreateButton(classicSettingsRoot.transform, "ON", new Vector2(155f, 110f), EnableThreeCheck, new Vector2(280f, 58f));
+            CreateText(classicSettingsRoot.transform, "PODIUM + OVERVIEW", new Vector2(0f, 45f), new Vector2(860f, 42f), 22);
+            arenaOffButton = CreateButton(classicSettingsRoot.transform, "OFF", new Vector2(-155f, -5f), DisablePodiumOverview, new Vector2(280f, 58f));
+            arenaOnButton = CreateButton(classicSettingsRoot.transform, "ON", new Vector2(155f, -5f), EnablePodiumOverview, new Vector2(280f, 58f));
+
+            colorChoiceText = CreateText(configureRoot.transform, "YOUR COLOR: RANDOM", new Vector2(0f, -95f), new Vector2(860f, 44f), 22);
+            whiteChoiceButton = CreateButton(configureRoot.transform, "WHITE", new Vector2(-285f, -145f), ChooseWhite, new Vector2(240f, 58f));
+            randomChoiceButton = CreateButton(configureRoot.transform, "RANDOM", new Vector2(0f, -145f), ChooseRandom, new Vector2(240f, 58f));
+            blackChoiceButton = CreateButton(configureRoot.transform, "BLACK", new Vector2(285f, -145f), ChooseBlack, new Vector2(240f, 58f));
+            configureSummaryText = CreateText(configureRoot.transform, string.Empty, new Vector2(0f, -245f), new Vector2(860f, 94f), 22);
+            createRoomButton = CreateButton(configureRoot.transform, "CREATE ROOM", new Vector2(0f, -355f), BeginCreate, new Vector2(460f, 68f));
+            configureBackButton = CreateButton(configureRoot.transform, "BACK", new Vector2(0f, -445f), ShowChoose, new Vector2(360f, 68f));
             RefreshConfigurationChoices();
 
             createRoot = CreatePage("Create");

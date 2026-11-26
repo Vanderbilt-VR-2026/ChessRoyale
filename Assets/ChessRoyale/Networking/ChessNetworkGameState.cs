@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ChessRoyale;
 using Fusion;
 using UnityEngine;
@@ -12,6 +13,18 @@ namespace ChessRoyale.Networking
         public sbyte SquareIndex;
         public NetworkBool HasMoved;
         public NetworkBool Captured;
+    }
+
+    public struct ChaosCarryState : INetworkStruct
+    {
+        public NetworkBool Active;
+        public byte PieceId;
+        public sbyte OriginSquare;
+        public byte Hand;
+        public byte InteractionMode;
+        public int ClientGrabNonce;
+        public int ExpiresAtTick;
+        public byte CarrySequence;
     }
 
     [DisallowMultipleComponent]
@@ -42,16 +55,35 @@ namespace ChessRoyale.Networking
         [Networked] public int BlackTimeMs { get; set; }
         [Networked] public NetworkBool WhiteRematch { get; set; }
         [Networked] public NetworkBool BlackRematch { get; set; }
+        [Networked] public ChaosCarryState WhiteCarry { get; set; }
+        [Networked] public ChaosCarryState BlackCarry { get; set; }
+        [Networked] public int ChaosBatchSequence { get; set; }
         // Shared deadline in Fusion simulation time, like the tutorial's lobby countdown. Zero = no one is missing.
         [Networked] public float ReconnectDeadline { get; set; }
         [Networked] public int DroppedColor { get; set; }
         [Networked, Capacity(32)]
         public NetworkArray<NetworkPieceState> Pieces => default;
+        [Networked, Capacity(32)]
+        public NetworkArray<int> PieceCooldownEndTick => default;
 
         private int appliedSequence;
         private ChessRulesSnapshot latestSnapshot;
         private int lastWhiteRequestId;
         private int lastBlackRequestId;
+        private readonly List<PendingChaosMove> pendingChaosMoves = new List<PendingChaosMove>(2);
+        private int chaosBatchCloseTick;
+        private byte nextCarrySequence = 1;
+
+        private struct PendingChaosMove
+        {
+            public PlayerRef Player;
+            public ChessPieceColor Seat;
+            public byte RequestId;
+            public byte PieceId;
+            public sbyte OriginSquare;
+            public sbyte DestinationSquare;
+            public int ReceivedTick;
+        }
 
         public bool LocalPlayerAcceptedRematch
         {
@@ -93,6 +125,47 @@ namespace ChessRoyale.Networking
             }
         }
 
+        public bool IsChaosMatch => ChessFusionLobbyState.Instance != null && ChessFusionLobbyState.Instance.MatchConfig.IsChaos;
+
+        public int CurrentSimulationTick => Runner != null ? Runner.Tick.Raw : 0;
+
+        public bool IsPieceCoolingDown(byte pieceId)
+        {
+            return pieceId < 32 && PieceCooldownEndTick[pieceId] > CurrentSimulationTick;
+        }
+
+        public float GetPieceCooldownSeconds(byte pieceId)
+        {
+            if (pieceId >= 32 || Runner == null)
+                return 0f;
+            int ticks = Mathf.Max(0, PieceCooldownEndTick[pieceId] - CurrentSimulationTick);
+            return ticks / Mathf.Max(1f, Runner.TickRate);
+        }
+
+        public ChaosCarryState GetCarry(ChessPieceColor color)
+        {
+            return color == ChessPieceColor.White ? WhiteCarry : BlackCarry;
+        }
+
+        public ChaosCarryState GetLocalCarry()
+        {
+            if (Runner == null)
+                return default;
+            if (Runner.LocalPlayer == WhitePlayer)
+                return WhiteCarry;
+            if (Runner.LocalPlayer == BlackPlayer)
+                return BlackCarry;
+            return default;
+        }
+
+        public float GetCarrySeconds(ChessPieceColor color)
+        {
+            ChaosCarryState carry = GetCarry(color);
+            if (!carry.Active || Runner == null)
+                return 0f;
+            return Mathf.Max(0, carry.ExpiresAtTick - CurrentSimulationTick) / Mathf.Max(1f, Runner.TickRate);
+        }
+
         public override void Spawned()
         {
             Instance = this;
@@ -102,6 +175,8 @@ namespace ChessRoyale.Networking
             PendingPromotionPieceId = -1;
             EnPassantSquareIndex = -1;
             EnPassantPawnId = -1;
+            WhiteCarry = default;
+            BlackCarry = default;
         }
 
         public override void Despawned(NetworkRunner runner, bool hasState)
@@ -119,6 +194,10 @@ namespace ChessRoyale.Networking
 
             lastWhiteRequestId = 0;
             lastBlackRequestId = 0;
+            pendingChaosMoves.Clear();
+            chaosBatchCloseTick = 0;
+            WhiteCarry = default;
+            BlackCarry = default;
         }
 
         // Called by the lobby state whenever seats change. A seat emptying mid-game opens a window
@@ -161,6 +240,14 @@ namespace ChessRoyale.Networking
                     PublishDisconnect((ChessPieceColor)DroppedColor);
             }
 
+            if (lobby != null && lobby.MatchConfig.IsChaos)
+            {
+                ExpireChaosCarries();
+                if (pendingChaosMoves.Count > 0 && chaosBatchCloseTick > 0 && Runner.Tick.Raw >= chaosBatchCloseTick)
+                    ResolveChaosBatch();
+                return;
+            }
+
             if (game == null || lobby == null || !lobby.MatchReady || game.Outcome != ChessGameOutcome.InProgress)
                 return;
             if (WhiteTimeMs <= 0 && BlackTimeMs <= 0)
@@ -182,11 +269,14 @@ namespace ChessRoyale.Networking
 
         public override void Render()
         {
-            if (MoveSequence == 0 || MoveSequence == appliedSequence)
-                return;
-
             ChessGameController game = ChessGameController.Instance;
             if (game == null || game.RegisteredPieceCount < 32)
+                return;
+
+            ChessNetworkMoveCoordinator.Instance?.OnNetworkStateRendered();
+            if (game.IsChaosMode)
+                game.RefreshLocalControls();
+            if (MoveSequence == 0 || MoveSequence == appliedSequence)
                 return;
 
             appliedSequence = MoveSequence;
@@ -236,6 +326,7 @@ namespace ChessRoyale.Networking
                 ? Random.Range(0, 960)
                 : 0;
             ClearRematchAgreement();
+            ClearChaosRoundState();
             ResetClockTimes();
             game.ResetGame(config, RoundChess960Index);
             CopySeatsFromLobby();
@@ -260,6 +351,7 @@ namespace ChessRoyale.Networking
             else
                 RoundChess960Index = 0;
             ClearRematchAgreement();
+            ClearChaosRoundState();
             ResetClockTimes();
             game.ResetGame(lobby.MatchConfig, RoundChess960Index);
             CopySeatsFromLobby();
@@ -296,6 +388,22 @@ namespace ChessRoyale.Networking
             RPC_RequestMove(RoundSequence, requestId, pieceId, originSquare, destinationSquare);
         }
 
+        public void RequestBeginChaosCarry(int clientNonce, byte pieceId, sbyte originSquare, byte hand, byte interactionMode)
+        {
+            RPC_RequestBeginChaosCarry(RoundSequence, clientNonce, pieceId, originSquare, hand, interactionMode);
+        }
+
+        public void RequestChaosRelease(byte requestId, byte pieceId, sbyte originSquare, sbyte destinationSquare,
+            byte carrySequence)
+        {
+            RPC_RequestChaosRelease(RoundSequence, requestId, pieceId, originSquare, destinationSquare, carrySequence);
+        }
+
+        public void RequestCancelChaosCarry(int clientNonce, byte pieceId)
+        {
+            RPC_RequestCancelChaosCarry(RoundSequence, clientNonce, pieceId);
+        }
+
         public void RequestPromotion(byte requestId, byte pieceId, byte promotionType)
         {
             RPC_RequestPromotion(RoundSequence, requestId, pieceId, promotionType);
@@ -307,8 +415,134 @@ namespace ChessRoyale.Networking
         }
 
         [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+        private void RPC_RequestBeginChaosCarry(int roundSequence, int clientNonce, byte pieceId, sbyte originSquare,
+            byte hand, byte interactionMode, RpcInfo info = default)
+        {
+            if (roundSequence != RoundSequence || !IsChaosMatch)
+            {
+                RejectCarry(info.Source, clientNonce, pieceId, "That carry belongs to another round or mode.");
+                return;
+            }
+
+            if (!TryValidateSender(info.Source, out ChessPieceColor seat, out string error))
+            {
+                RejectCarry(info.Source, clientNonce, pieceId, error);
+                return;
+            }
+
+            ChessGameController game = ChessGameController.Instance;
+            ChessPieceInteractable piece = game != null ? game.FindPiece(pieceId) : null;
+            ChaosCarryState current = GetCarry(seat);
+            if (current.Active || HasPendingChaosMove(seat))
+                error = "Finish the current Chaos move first.";
+            else if (piece == null || piece.IsCaptured || piece.CurrentSquare == null)
+                error = "That piece is not on the board.";
+            else if (piece.PieceColor != seat)
+                error = "You can carry only your own pieces.";
+            else if (ChessSquareIndex.FromSquare(piece.CurrentSquare) != originSquare)
+                error = "The piece moved before the carry began.";
+            else if (IsPieceCoolingDown(pieceId))
+                error = "That piece is cooling down.";
+
+            if (!string.IsNullOrEmpty(error))
+            {
+                RejectCarry(info.Source, clientNonce, pieceId, error);
+                return;
+            }
+
+            int durationTicks = Mathf.Max(1, Mathf.CeilToInt(
+                ChessModePolicies.Interaction(ChessGameplayMode.Chaos).CarryDurationSeconds * Runner.TickRate));
+            byte sequence = nextCarrySequence++;
+            if (nextCarrySequence == 0)
+                nextCarrySequence = 1;
+            SetCarry(seat, new ChaosCarryState
+            {
+                Active = true,
+                PieceId = pieceId,
+                OriginSquare = originSquare,
+                Hand = hand,
+                InteractionMode = interactionMode,
+                ClientGrabNonce = clientNonce,
+                ExpiresAtTick = Runner.Tick.Raw + durationTicks,
+                CarrySequence = sequence,
+            });
+        }
+
+        [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+        private void RPC_RequestCancelChaosCarry(int roundSequence, int clientNonce, byte pieceId, RpcInfo info = default)
+        {
+            if (roundSequence != RoundSequence || !TryIdentifySeat(info.Source, out ChessPieceColor seat, out _))
+                return;
+            ChaosCarryState carry = GetCarry(seat);
+            if (carry.Active && carry.ClientGrabNonce == clientNonce && carry.PieceId == pieceId)
+                SetCarry(seat, default);
+        }
+
+        [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+        private void RPC_RequestChaosRelease(int roundSequence, byte requestId, byte pieceId, sbyte originSquare,
+            sbyte destinationSquare, byte carrySequence, RpcInfo info = default)
+        {
+            if (roundSequence != RoundSequence || !IsChaosMatch)
+            {
+                Reject(info.Source, requestId, pieceId, "That release belongs to another round or mode.");
+                return;
+            }
+
+            if (!TryValidateSender(info.Source, out ChessPieceColor seat, out string error))
+            {
+                Reject(info.Source, requestId, pieceId, error);
+                return;
+            }
+            if (!TryAcceptRequest(seat, requestId))
+                return;
+
+            ChaosCarryState carry = GetCarry(seat);
+            ChessGameController game = ChessGameController.Instance;
+            ChessPieceInteractable piece = game != null ? game.FindPiece(pieceId) : null;
+            ChessBoardSquare destination = game != null ? game.FindSquareByIndex(destinationSquare) : null;
+            if (!carry.Active || carry.PieceId != pieceId || carry.CarrySequence != carrySequence)
+                error = "That carry is no longer active.";
+            else if (Runner.Tick.Raw > carry.ExpiresAtTick)
+                error = "The carry timer expired.";
+            else if (piece == null || piece.IsCaptured || ChessSquareIndex.FromSquare(piece.CurrentSquare) != originSquare ||
+                     carry.OriginSquare != originSquare)
+                error = "The piece was no longer on the expected square.";
+            else if (IsPieceCoolingDown(pieceId))
+                error = "That piece is cooling down.";
+            else if (!game.IsChaosMoveLegal(piece, destination))
+                error = "That Chaos move is not legal.";
+
+            if (!string.IsNullOrEmpty(error))
+            {
+                SetCarry(seat, default);
+                Reject(info.Source, requestId, pieceId, error);
+                return;
+            }
+
+            pendingChaosMoves.Add(new PendingChaosMove
+            {
+                Player = info.Source,
+                Seat = seat,
+                RequestId = requestId,
+                PieceId = pieceId,
+                OriginSquare = originSquare,
+                DestinationSquare = destinationSquare,
+                ReceivedTick = Runner.Tick.Raw,
+            });
+            SetCarry(seat, default);
+            int ticksPerWindow = Mathf.Max(1, Mathf.CeilToInt(Runner.TickRate * 0.1f));
+            int currentWindow = Runner.Tick.Raw / ticksPerWindow;
+            chaosBatchCloseTick = (currentWindow + 1) * ticksPerWindow;
+        }
+
+        [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
         private void RPC_RequestMove(int roundSequence, byte requestId, byte pieceId, sbyte originSquare, sbyte destinationSquare, RpcInfo info = default)
         {
+            if (IsChaosMatch)
+            {
+                Reject(info.Source, requestId, pieceId, "Chaos moves must begin with an authoritative carry.");
+                return;
+            }
             if (roundSequence != RoundSequence)
             {
                 Reject(info.Source, requestId, pieceId, "That move belongs to an earlier round.");
@@ -531,6 +765,142 @@ namespace ChessRoyale.Networking
             return true;
         }
 
+        private void SetCarry(ChessPieceColor seat, ChaosCarryState carry)
+        {
+            if (seat == ChessPieceColor.White)
+                WhiteCarry = carry;
+            else
+                BlackCarry = carry;
+        }
+
+        private bool HasPendingChaosMove(ChessPieceColor seat)
+        {
+            for (int index = 0; index < pendingChaosMoves.Count; index++)
+            {
+                if (pendingChaosMoves[index].Seat == seat)
+                    return true;
+            }
+            return false;
+        }
+
+        private void ExpireChaosCarries()
+        {
+            int tick = Runner.Tick.Raw;
+            if (WhiteCarry.Active && tick > WhiteCarry.ExpiresAtTick)
+                WhiteCarry = default;
+            if (BlackCarry.Active && tick > BlackCarry.ExpiresAtTick)
+                BlackCarry = default;
+        }
+
+        private void ResolveChaosBatch()
+        {
+            chaosBatchCloseTick = 0;
+            if (pendingChaosMoves.Count == 0)
+                return;
+
+            ChessGameController game = ChessGameController.Instance;
+            if (game == null || !game.IsChaosMode || game.Outcome != ChessGameOutcome.InProgress)
+            {
+                pendingChaosMoves.Clear();
+                return;
+            }
+
+            List<PendingChaosMove> valid = new List<PendingChaosMove>(pendingChaosMoves.Count);
+            for (int index = 0; index < pendingChaosMoves.Count; index++)
+            {
+                PendingChaosMove move = pendingChaosMoves[index];
+                ChessPieceInteractable piece = game.FindPiece(move.PieceId);
+                ChessBoardSquare destination = game.FindSquareByIndex(move.DestinationSquare);
+                if (piece == null || piece.IsCaptured || ChessSquareIndex.FromSquare(piece.CurrentSquare) != move.OriginSquare ||
+                    !game.IsChaosMoveLegal(piece, destination))
+                {
+                    Reject(move.Player, move.RequestId, move.PieceId, "The board changed before that Chaos move resolved.");
+                    continue;
+                }
+                valid.Add(move);
+            }
+            pendingChaosMoves.Clear();
+            if (valid.Count == 0)
+                return;
+
+            Dictionary<sbyte, int> destinationClaims = new Dictionary<sbyte, int>();
+            for (int index = 0; index < valid.Count; index++)
+            {
+                destinationClaims.TryGetValue(valid[index].DestinationSquare, out int count);
+                destinationClaims[valid[index].DestinationSquare] = count + 1;
+            }
+
+            List<ChaosResolvedMove> resolved = new List<ChaosResolvedMove>(valid.Count);
+            for (int index = 0; index < valid.Count; index++)
+            {
+                PendingChaosMove move = valid[index];
+                if (destinationClaims[move.DestinationSquare] > 1)
+                {
+                    SetCooldown(move.PieceId, 1f);
+                    Reject(move.Player, move.RequestId, move.PieceId, "Both players claimed that square. The pieces collided.");
+                    continue;
+                }
+                resolved.Add(new ChaosResolvedMove(move.PieceId, move.DestinationSquare));
+            }
+
+            if (resolved.Count > 0 && !game.ApplyChaosBatch(resolved))
+            {
+                for (int index = 0; index < valid.Count; index++)
+                    Reject(valid[index].Player, valid[index].RequestId, valid[index].PieceId, "The Chaos batch could not be applied.");
+                return;
+            }
+
+            if (WhiteCarry.Active && (game.FindPiece(WhiteCarry.PieceId) == null || game.FindPiece(WhiteCarry.PieceId).IsCaptured))
+                WhiteCarry = default;
+            if (BlackCarry.Active && (game.FindPiece(BlackCarry.PieceId) == null || game.FindPiece(BlackCarry.PieceId).IsCaptured))
+                BlackCarry = default;
+
+            for (int index = 0; index < resolved.Count; index++)
+            {
+                ChessPieceInteractable piece = game.FindPiece(resolved[index].PieceId);
+                if (piece != null && !piece.IsCaptured)
+                    SetCooldown(piece.PieceId,
+                        ChessModePolicies.Interaction(ChessGameplayMode.Chaos).CooldownSeconds(piece.PieceType));
+            }
+
+            ChaosBatchSequence++;
+            PublishAfterLocalRulesChange();
+        }
+
+        private void SetCooldown(byte pieceId, float seconds)
+        {
+            if (pieceId >= 32 || Runner == null)
+                return;
+            int ticks = Mathf.Max(1, Mathf.CeilToInt(seconds * Runner.TickRate));
+            PieceCooldownEndTick.Set(pieceId, Runner.Tick.Raw + ticks);
+        }
+
+        private void ClearChaosRoundState()
+        {
+            pendingChaosMoves.Clear();
+            chaosBatchCloseTick = 0;
+            WhiteCarry = default;
+            BlackCarry = default;
+            for (int index = 0; index < 32; index++)
+                PieceCooldownEndTick.Set(index, 0);
+            ChaosBatchSequence = 0;
+        }
+
+        private void RejectCarry(PlayerRef sender, int clientNonce, byte pieceId, string reason)
+        {
+            Debug.LogWarning(reason, this);
+            RPC_RejectCarry(sender, clientNonce, pieceId, reason);
+        }
+
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        private void RPC_RejectCarry(PlayerRef requester, int clientNonce, byte pieceId, string reason)
+        {
+            if (Runner != null && requester != Runner.LocalPlayer)
+                return;
+            Debug.Log($"Chaos carry rejected: {reason}", this);
+            ChessNetworkMoveCoordinator.Instance?.OnChaosCarryRejected(clientNonce, pieceId, reason);
+        }
+
         private void ResetClockTimes()
         {
             int startingMs = ChessClock.Instance != null ? ChessClock.Instance.StartingTimeMs : 10 * 60 * 1000;
@@ -627,6 +997,7 @@ namespace ChessRoyale.Networking
                 WhiteChecksDelivered = WhiteChecksDelivered,
                 BlackChecksDelivered = BlackChecksDelivered,
                 ThreeCheckEnabled = config.ThreeCheckEnabled,
+                GameplayMode = config.GameplayMode,
                 StartingLayout = config.StartingLayout,
                 Chess960Index = RoundChess960Index,
                 LastWhiteMove = LastWhiteMove,

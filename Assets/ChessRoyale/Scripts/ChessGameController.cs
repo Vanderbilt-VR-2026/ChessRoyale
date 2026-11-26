@@ -21,6 +21,9 @@ namespace ChessRoyale
         BlackWinsByDisconnect,
         WhiteWinsByThreeCheck,
         BlackWinsByThreeCheck,
+        WhiteWinsByKingCapture,
+        BlackWinsByKingCapture,
+        DrawMutualKingCapture,
     }
 
     [DisallowMultipleComponent]
@@ -71,6 +74,7 @@ namespace ChessRoyale
         private bool executingAiMove;
         private ChessPieceType aiPromotionType = ChessPieceType.Queen;
         private bool threeCheckEnabled;
+        private ChessGameplayMode gameplayMode;
         private byte whiteChecksDelivered;
         private byte blackChecksDelivered;
         private ChessStartingLayout startingLayout;
@@ -119,6 +123,8 @@ namespace ChessRoyale
         public int RegisteredPieceCount => pieces.Count;
         public bool IsPromotionPending => pendingPromotionPiece != null;
         public bool ThreeCheckEnabled => threeCheckEnabled;
+        public ChessGameplayMode GameplayMode => gameplayMode;
+        public bool IsChaosMode => gameplayMode == ChessGameplayMode.Chaos;
         public byte WhiteChecksDelivered => whiteChecksDelivered;
         public byte BlackChecksDelivered => blackChecksDelivered;
 
@@ -303,6 +309,118 @@ namespace ChessRoyale
             return true;
         }
 
+        public bool IsChaosMoveLegal(ChessPieceInteractable piece, ChessBoardSquare destination)
+        {
+            return IsChaosMode && outcome == ChessGameOutcome.InProgress && piece != null && !piece.IsCaptured &&
+                   destination != null && GetChaosLegalMovesCore(piece).Contains(destination);
+        }
+
+        public bool ApplyChaosBatch(IReadOnlyList<ChaosResolvedMove> moves)
+        {
+            if (!IsChaosMode || outcome != ChessGameOutcome.InProgress || moves == null || moves.Count == 0)
+                return false;
+
+            Dictionary<byte, ChessBoardSquare> origins = new Dictionary<byte, ChessBoardSquare>();
+            Dictionary<byte, ChessBoardSquare> destinations = new Dictionary<byte, ChessBoardSquare>();
+            HashSet<byte> leavers = new HashSet<byte>();
+            for (int index = 0; index < moves.Count; index++)
+            {
+                ChessPieceInteractable piece = FindPiece(moves[index].PieceId);
+                ChessBoardSquare destination = FindSquareByIndex(moves[index].DestinationSquare);
+                if (piece == null || piece.IsCaptured || piece.CurrentSquare == null || destination == null)
+                    return false;
+                origins[piece.PieceId] = piece.CurrentSquare;
+                destinations[piece.PieceId] = destination;
+                leavers.Add(piece.PieceId);
+            }
+
+            List<ChessPieceInteractable> captures = new List<ChessPieceInteractable>();
+            foreach (KeyValuePair<byte, ChessBoardSquare> move in destinations)
+            {
+                if (board.TryGetValue(move.Value, out ChessPieceInteractable occupant) && !leavers.Contains(occupant.PieceId))
+                    captures.Add(occupant);
+            }
+
+            foreach (ChessBoardSquare origin in origins.Values)
+                board.Remove(origin);
+
+            bool whiteKingCaptured = false;
+            bool blackKingCaptured = false;
+            foreach (ChessPieceInteractable captured in captures)
+            {
+                if (captured == null || captured.IsCaptured)
+                    continue;
+                board.Remove(captured.CurrentSquare);
+                if (captured.PieceType == ChessPieceType.King)
+                {
+                    whiteKingCaptured |= captured.PieceColor == ChessPieceColor.White;
+                    blackKingCaptured |= captured.PieceColor == ChessPieceColor.Black;
+                }
+                captured.Capture();
+            }
+
+            foreach (KeyValuePair<byte, ChessBoardSquare> move in destinations)
+            {
+                ChessPieceInteractable piece = FindPiece(move.Key);
+                if (piece == null || piece.IsCaptured)
+                    continue;
+                board[move.Value] = piece;
+                piece.MoveToSquare(move.Value);
+                if (piece.PieceType == ChessPieceType.Pawn &&
+                    (move.Value.RankIndex == 0 || move.Value.RankIndex == 7))
+                    piece.PromoteTo(ChessPieceType.Queen);
+                MarkLastMove(piece);
+            }
+
+            pendingPromotionPiece = null;
+            enPassantTargetSquare = null;
+            enPassantVulnerablePawn = null;
+            halfmoveClock = 0;
+            ClearCheckSignal();
+
+            if (whiteKingCaptured && blackKingCaptured)
+            {
+                outcome = ChessGameOutcome.DrawMutualKingCapture;
+                statusMessage = "Draw by mutual king capture";
+            }
+            else if (blackKingCaptured)
+            {
+                outcome = ChessGameOutcome.WhiteWinsByKingCapture;
+                statusMessage = "White captures the king";
+            }
+            else if (whiteKingCaptured)
+            {
+                outcome = ChessGameOutcome.BlackWinsByKingCapture;
+                statusMessage = "Black captures the king";
+            }
+            else
+            {
+                ChessBoardSquare whiteKing = FindKingSquare(ChessPieceColor.White);
+                ChessBoardSquare blackKing = FindKingSquare(ChessPieceColor.Black);
+                bool whiteThreatened = whiteKing != null && IsSquareAttacked(whiteKing, ChessPieceColor.Black);
+                bool blackThreatened = blackKing != null && IsSquareAttacked(blackKing, ChessPieceColor.White);
+                if (whiteThreatened)
+                {
+                    checkedKingSquare = whiteKing;
+                    checkedKingSquare.SetCheckHint(true);
+                }
+                else if (blackThreatened)
+                {
+                    checkedKingSquare = blackKing;
+                    checkedKingSquare.SetCheckHint(true);
+                }
+                statusMessage = whiteThreatened && blackThreatened ? "Both kings threatened"
+                    : whiteThreatened ? "White king threatened"
+                    : blackThreatened ? "Black king threatened"
+                    : "Protect your king";
+            }
+
+            if (outcome != ChessGameOutcome.InProgress)
+                Debug.Log($"Chess Royale result: {statusMessage}");
+            RefreshTurnInteraction();
+            return true;
+        }
+
         public void FinishMovePresentation()
         {
             RefreshTurnInteraction();
@@ -455,6 +573,7 @@ namespace ChessRoyale
                 WhiteChecksDelivered = whiteChecksDelivered,
                 BlackChecksDelivered = blackChecksDelivered,
                 ThreeCheckEnabled = threeCheckEnabled,
+                GameplayMode = (byte)gameplayMode,
                 StartingLayout = (byte)startingLayout,
                 Chess960Index = chess960Index,
                 LastWhiteMove = lastWhiteMove,
@@ -491,6 +610,7 @@ namespace ChessRoyale
             RefreshLastMoveOutlines();
             activeColor = snapshot.ActiveColor;
             outcome = snapshot.Outcome;
+            gameplayMode = (ChessGameplayMode)snapshot.GameplayMode;
             statusMessage = string.IsNullOrEmpty(snapshot.StatusMessage)
                 ? DescribeOutcome(snapshot.Outcome, snapshot.ActiveColor)
                 : snapshot.StatusMessage;
@@ -533,7 +653,8 @@ namespace ChessRoyale
             board.Clear();
             activeColor = ChessPieceColor.White;
             outcome = ChessGameOutcome.InProgress;
-            statusMessage = "White to move";
+            gameplayMode = (ChessGameplayMode)config.GameplayMode;
+            statusMessage = IsChaosMode ? "Protect your king" : "White to move";
             pendingPromotionPiece = null;
             enPassantTargetSquare = null;
             enPassantVulnerablePawn = null;
@@ -738,11 +859,16 @@ namespace ChessRoyale
 
         public HashSet<ChessBoardSquare> GetLegalMoves(ChessPieceInteractable piece)
         {
+            return ChessModePolicies.Rules(gameplayMode).GetLegalMoves(this, piece);
+        }
+
+        internal HashSet<ChessBoardSquare> GetTurnBasedLegalMovesCore(ChessPieceInteractable piece)
+        {
             HashSet<ChessBoardSquare> legal = new HashSet<ChessBoardSquare>();
             if (piece == null || piece.CurrentSquare == null)
                 return legal;
 
-            foreach (ChessBoardSquare destination in GetPseudoLegalMoves(piece))
+            foreach (ChessBoardSquare destination in GetPseudoLegalMoves(piece, true))
             {
                 if (!WouldLeaveKingInCheck(piece, destination))
                     legal.Add(destination);
@@ -754,7 +880,14 @@ namespace ChessRoyale
             return legal;
         }
 
-        private HashSet<ChessBoardSquare> GetPseudoLegalMoves(ChessPieceInteractable piece)
+        internal HashSet<ChessBoardSquare> GetChaosLegalMovesCore(ChessPieceInteractable piece)
+        {
+            if (piece == null || piece.CurrentSquare == null || piece.IsCaptured)
+                return new HashSet<ChessBoardSquare>();
+            return GetPseudoLegalMoves(piece, false);
+        }
+
+        private HashSet<ChessBoardSquare> GetPseudoLegalMoves(ChessPieceInteractable piece, bool includeSpecialMoves)
         {
             HashSet<ChessBoardSquare> moves = new HashSet<ChessBoardSquare>();
             ChessBoardSquare origin = piece.CurrentSquare;
@@ -762,7 +895,7 @@ namespace ChessRoyale
             switch (piece.PieceType)
             {
                 case ChessPieceType.Pawn:
-                    AddPawnMoves(piece, moves);
+                    AddPawnMoves(piece, moves, includeSpecialMoves);
                     break;
                 case ChessPieceType.Knight:
                     foreach (Vector2Int offset in KnightOffsets)
@@ -783,7 +916,7 @@ namespace ChessRoyale
                         AddIfAvailable(piece, origin.FileIndex + direction.x, origin.RankIndex + direction.y, moves);
                     foreach (Vector2Int direction in StraightDirections)
                         AddIfAvailable(piece, origin.FileIndex + direction.x, origin.RankIndex + direction.y, moves);
-                    if (startingLayout != ChessStartingLayout.Chess960)
+                    if (includeSpecialMoves && startingLayout != ChessStartingLayout.Chess960)
                         AddCastlingMoves(piece, moves);
                     break;
             }
@@ -791,7 +924,7 @@ namespace ChessRoyale
             return moves;
         }
 
-        private void AddPawnMoves(ChessPieceInteractable piece, HashSet<ChessBoardSquare> moves)
+        private void AddPawnMoves(ChessPieceInteractable piece, HashSet<ChessBoardSquare> moves, bool includeSpecialMoves)
         {
             ChessBoardSquare origin = piece.CurrentSquare;
             int direction = piece.PieceColor == ChessPieceColor.White ? 1 : -1;
@@ -806,11 +939,12 @@ namespace ChessRoyale
                     moves.Add(twoSteps);
             }
 
-            AddPawnCapture(piece, origin.FileIndex - 1, origin.RankIndex + direction, moves);
-            AddPawnCapture(piece, origin.FileIndex + 1, origin.RankIndex + direction, moves);
+            AddPawnCapture(piece, origin.FileIndex - 1, origin.RankIndex + direction, moves, includeSpecialMoves);
+            AddPawnCapture(piece, origin.FileIndex + 1, origin.RankIndex + direction, moves, includeSpecialMoves);
         }
 
-        private void AddPawnCapture(ChessPieceInteractable piece, int file, int rank, HashSet<ChessBoardSquare> moves)
+        private void AddPawnCapture(ChessPieceInteractable piece, int file, int rank, HashSet<ChessBoardSquare> moves,
+            bool includeSpecialMoves)
         {
             ChessBoardSquare square = GetSquare(file, rank);
             if (square == null)
@@ -818,7 +952,7 @@ namespace ChessRoyale
 
             if (board.TryGetValue(square, out ChessPieceInteractable occupant) && IsCapturableEnemy(piece, occupant))
                 moves.Add(square);
-            else if (square == enPassantTargetSquare && enPassantVulnerablePawn != null &&
+            else if (includeSpecialMoves && square == enPassantTargetSquare && enPassantVulnerablePawn != null &&
                      enPassantVulnerablePawn.PieceColor != piece.PieceColor)
                 moves.Add(square);
         }
@@ -1325,6 +1459,12 @@ namespace ChessRoyale
                     return "White wins by delivering three checks";
                 case ChessGameOutcome.BlackWinsByThreeCheck:
                     return "Black wins by delivering three checks";
+                case ChessGameOutcome.WhiteWinsByKingCapture:
+                    return "White captures the king";
+                case ChessGameOutcome.BlackWinsByKingCapture:
+                    return "Black captures the king";
+                case ChessGameOutcome.DrawMutualKingCapture:
+                    return "Draw by mutual king capture";
                 default:
                     return $"{sideToMove} to move";
             }
@@ -1332,7 +1472,17 @@ namespace ChessRoyale
 
         private bool CanLocalPlayerMove(ChessPieceInteractable piece)
         {
-            if (piece == null || piece.IsCaptured || piece.PieceColor != activeColor)
+            if (piece == null || piece.IsCaptured)
+                return false;
+            if (IsChaosMode)
+            {
+                if (!networkSessionActive)
+                    return true;
+                if (!networkMatchReady || !networkHasSeat || piece.PieceColor != networkSeatColor)
+                    return false;
+                return ChessNetworkGameState.Instance == null || !ChessNetworkGameState.Instance.IsPieceCoolingDown(piece.PieceId);
+            }
+            if (piece.PieceColor != activeColor)
                 return false;
             if (IsSinglePlayer)
                 return ChessSinglePlayerSettings.GameStarted && piece.PieceColor == ChessSinglePlayerSettings.HumanColor;
@@ -1359,6 +1509,25 @@ namespace ChessRoyale
             ClearCheckSignal();
             if (outcome != ChessGameOutcome.InProgress)
                 return;
+
+            if (IsChaosMode)
+            {
+                ChessBoardSquare whiteKing = FindKingSquare(ChessPieceColor.White);
+                ChessBoardSquare blackKing = FindKingSquare(ChessPieceColor.Black);
+                bool whiteThreatened = whiteKing != null && IsSquareAttacked(whiteKing, ChessPieceColor.Black);
+                bool blackThreatened = blackKing != null && IsSquareAttacked(blackKing, ChessPieceColor.White);
+                if (whiteThreatened)
+                    checkedKingSquare = whiteKing;
+                else if (blackThreatened)
+                    checkedKingSquare = blackKing;
+                if (checkedKingSquare != null)
+                    checkedKingSquare.SetCheckHint(true);
+                statusMessage = whiteThreatened && blackThreatened ? "Both kings threatened"
+                    : whiteThreatened ? "White king threatened"
+                    : blackThreatened ? "Black king threatened"
+                    : "Protect your king";
+                return;
+            }
 
             ChessBoardSquare kingSquare = FindKingSquare(activeColor);
             if (kingSquare == null || !IsSquareAttacked(kingSquare, Opposite(activeColor)))

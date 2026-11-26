@@ -64,6 +64,8 @@ namespace ChessRoyale
         public bool HasMoved => hasMoved;
         public bool IsCaptured => captured;
         public byte PieceId { get; private set; } = byte.MaxValue;
+        public Transform SelectingTransform { get; private set; }
+        public bool IsLocallySelected => grabInteractable != null && grabInteractable.isSelected;
 
         public void Initialize(ChessPieceColor color, ChessPieceType type)
         {
@@ -99,6 +101,8 @@ namespace ChessRoyale
             UpdateColliderToVisibleModel();
             grabInteractable.trackRotation = false;
             grabInteractable.throwOnDetach = false;
+            if (GetComponent<ChessChaosPieceFeedback>() == null)
+                gameObject.AddComponent<ChessChaosPieceFeedback>();
         }
 
         private void Start()
@@ -201,8 +205,9 @@ namespace ChessRoyale
             outline?.SetTargeted(targeted);
         }
 
-        private void OnGrabbed(SelectEnterEventArgs _)
+        private void OnGrabbed(SelectEnterEventArgs args)
         {
+            SelectingTransform = args.interactorObject != null ? args.interactorObject.transform : null;
             SetTargetOutline(true);
             grabOriginSquare = currentSquare;
             holdDropPresentation = false;
@@ -219,11 +224,13 @@ namespace ChessRoyale
 
         private void OnReleased(SelectExitEventArgs args)
         {
+            SelectingTransform = null;
             SetTargetOutline(grabInteractable.isHovered);
             if (args.isCanceled)
             {
                 moveAllowed = false;
                 ChessGameController.Instance?.CancelMove();
+                ChessNetworkMoveCoordinator.Instance?.CancelLocalChaosCarry(this);
                 if (!captured)
                     SnapBackToCurrentSquare();
                 return;
@@ -374,6 +381,14 @@ namespace ChessRoyale
             SnapToSquare(currentSquare ?? grabOriginSquare ?? startingSquare);
         }
 
+        public void CancelSelectionAndSnapBack()
+        {
+            if (grabInteractable != null && grabInteractable.isSelected && grabInteractable.interactionManager != null)
+                grabInteractable.interactionManager.CancelInteractableSelection((IXRSelectInteractable)grabInteractable);
+            if (!captured)
+                SnapBackToCurrentSquare();
+        }
+
         public void ApplyAuthoritativeState(ChessBoardSquare square, ChessPieceType type, bool moved, bool isCaptured)
         {
             bool localPrediction = holdDropPresentation;
@@ -456,6 +471,8 @@ namespace ChessRoyale
             if (captured)
                 return;
 
+            if (grabInteractable != null && grabInteractable.isSelected && grabInteractable.interactionManager != null)
+                grabInteractable.interactionManager.CancelInteractableSelection((IXRSelectInteractable)grabInteractable);
             captured = true;
             currentSquare = null;
             boardSettlementPending = false;

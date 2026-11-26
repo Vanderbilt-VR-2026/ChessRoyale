@@ -97,7 +97,8 @@ namespace ChessRoyale.Editor
             if (game == null)
                 return;
 
-            EditorGUILayout.LabelField("Turn", game.ActiveColor.ToString());
+            EditorGUILayout.LabelField("Mode", game.IsChaosMode ? "Chaos" : "Classic");
+            EditorGUILayout.LabelField("Turn", game.IsChaosMode ? "Both players" : game.ActiveColor.ToString());
             EditorGUILayout.LabelField("Outcome", game.Outcome.ToString());
             EditorGUILayout.LabelField("Game status", game.StatusMessage ?? string.Empty);
             if (networkState != null)
@@ -225,7 +226,7 @@ namespace ChessRoyale.Editor
                 reason = "Choose a promotion piece before making another move.";
             else if (coordinator.IsWaiting)
                 reason = "Waiting for authority to answer the previous request.";
-            else if (game.ActiveColor != localSeat.Value)
+            else if (!game.IsChaosMode && game.ActiveColor != localSeat.Value)
                 reason = $"Waiting for {game.ActiveColor} to move on the other client.";
             else
             {
@@ -252,6 +253,16 @@ namespace ChessRoyale.Editor
                 return;
             }
 
+            if (game.IsChaosMode && ChessNetworkGameState.Instance != null)
+            {
+                float cooldown = ChessNetworkGameState.Instance.GetPieceCooldownSeconds(piece.PieceId);
+                if (cooldown > 0f)
+                {
+                    SetFeedback($"{originCoordinate} is cooling down for {cooldown:0.0}s.", MessageType.Warning);
+                    return;
+                }
+            }
+
             ChessBoardSquare origin = game.FindSquareByIndex(originIndex);
             ChessBoardSquare destination = game.FindSquareByIndex(destinationIndex);
             if (origin == null || destination == null)
@@ -268,7 +279,9 @@ namespace ChessRoyale.Editor
 
             string submittedMove = $"{originCoordinate}-{destinationCoordinate}";
             coordinator.SubmitReleasedMove(piece, origin, destination, moveAllowed: true);
-            SetFeedback($"Submitted {submittedMove}. Waiting for Fusion authority.", MessageType.Info);
+            SetFeedback(game.IsChaosMode
+                ? $"Started and released {submittedMove}. Waiting for the Chaos batch."
+                : $"Submitted {submittedMove}. Waiting for Fusion authority.", MessageType.Info);
             originCoordinate = string.Empty;
             destinationCoordinate = string.Empty;
         }
