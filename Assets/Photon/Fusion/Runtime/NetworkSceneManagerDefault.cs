@@ -96,6 +96,10 @@ namespace Fusion {
     /// <param name="runner"></param>
     public virtual void Initialize(NetworkRunner runner) {
       Log.TraceSceneManager(runner, $"Initialize with {runner}");
+
+      // Enter Play Mode can skip SubsystemRegistration when domain reload is disabled.
+      // Always ensure the shared ownership table exists before scene takeover starts.
+      _allOwnedScenes ??= new Dictionary<Scene, NetworkSceneManagerDefault>(new FusionUnitySceneManagerUtils.SceneEqualityComparer());
       
 #if FUSION_ENABLE_ADDRESSABLES && !FUSION_DISABLE_ADDRESSABLES
       LoadAddressableScenePathsAsync();
