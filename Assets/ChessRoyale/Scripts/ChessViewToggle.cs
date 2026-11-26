@@ -65,6 +65,7 @@ namespace ChessRoyale
 
         private bool panelPlaced;
         private bool panelFollowing;
+        private bool available = true;
 
         public static ChessViewToggle Instance { get; private set; }
 
@@ -140,6 +141,8 @@ namespace ChessRoyale
         // Single-player setup and results are not part of an active match.
         private bool IsGameRunning()
         {
+            if (!available)
+                return false;
             ChessGameController game = ChessGameController.Instance;
             if (game == null || game.Outcome != ChessGameOutcome.InProgress)
                 return false;
@@ -177,6 +180,17 @@ namespace ChessRoyale
         public void Toggle()
         {
             SetMode(Mode == ViewMode.Immersive ? ViewMode.Overview : ViewMode.Immersive);
+        }
+
+        public void SetAvailable(bool value)
+        {
+            if (available == value)
+                return;
+
+            if (!value && Mode == ViewMode.Overview)
+                SetMode(ViewMode.Immersive);
+            available = value;
+            UpdateVisibility();
         }
 
         public void SetMode(ViewMode mode)

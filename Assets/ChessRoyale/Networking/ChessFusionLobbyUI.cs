@@ -15,7 +15,9 @@ namespace ChessRoyale.Networking
         {
             Choose,
             Join,
+            Configure,
             Create,
+            Confirm,
             Playing,
             Rematch
         }
@@ -26,18 +28,34 @@ namespace ChessRoyale.Networking
         private Text resultTitleText;
         private Text rematchStatusText;
         private Text colorChoiceText;
+        private Text configureSummaryText;
+        private Text createSummaryText;
+        private Text confirmSummaryText;
+        private Text confirmStatusText;
         private ChessSeat resultSeat = ChessSeat.None;
         private InputField codeInput;
         private Camera followedCamera;
         private Canvas canvas;
         private GameObject chooseRoot;
         private GameObject joinRoot;
+        private GameObject configureRoot;
         private GameObject createRoot;
+        private GameObject confirmRoot;
         private GameObject rematchRoot;
         private Button whiteChoiceButton;
         private Button randomChoiceButton;
         private Button blackChoiceButton;
+        private Button standardButton;
+        private Button chess960Button;
+        private Button threeCheckOffButton;
+        private Button threeCheckOnButton;
+        private Button arenaOffButton;
+        private Button arenaOnButton;
+        private Button readyButton;
         private ChessSeatPreference creatorSeatPreference = ChessSeatPreference.Random;
+        private ChessStartingLayout pendingStartingLayout = ChessStartingLayout.Standard;
+        private bool pendingThreeCheck;
+        private bool pendingPodiumOverview = true;
         private LobbyScreen screen = LobbyScreen.Choose;
         private LobbyScreen shownScreen = (LobbyScreen)(-1);
         private int flowGeneration;
@@ -138,7 +156,7 @@ namespace ChessRoyale.Networking
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
             ChessRoyale.ChessGameController game = ChessRoyale.ChessGameController.Instance;
             bool connected = room != null && room.IsConnected;
-            bool ready = connected && lobby != null && lobby.MatchReady;
+            bool ready = connected && lobby != null && lobby.MatchReady && lobby.MatchPhase == ChessMatchPhase.Playing;
             bool ended = game != null && game.Outcome != ChessRoyale.ChessGameOutcome.InProgress;
             if (lobby != null && lobby.LocalSeat != ChessSeat.None)
                 resultSeat = lobby.LocalSeat;
@@ -160,9 +178,14 @@ namespace ChessRoyale.Networking
                     ? "Type a four-letter room code."
                     : room.DisconnectNotice;
             }
+            else if (connected && lobby != null && lobby.MatchPhase == ChessMatchPhase.Configuring)
+            {
+                screen = lobby.CreatorPlayer == room.Runner.LocalPlayer ? LobbyScreen.Create : LobbyScreen.Confirm;
+            }
             else if (ready && !ended)
                 screen = LobbyScreen.Playing;
-            else if (ended && (screen == LobbyScreen.Playing || screen == LobbyScreen.Rematch || ready))
+            else if ((ended || (lobby != null && lobby.MatchPhase == ChessMatchPhase.Ended)) &&
+                     (screen == LobbyScreen.Playing || screen == LobbyScreen.Rematch || lobby != null && lobby.MatchReady))
                 screen = LobbyScreen.Rematch;
             else if (!connected && screen == LobbyScreen.Playing)
                 screen = LobbyScreen.Choose;
@@ -171,6 +194,8 @@ namespace ChessRoyale.Networking
 
             if (screen == LobbyScreen.Create)
                 RefreshCreate(room, lobby);
+            else if (screen == LobbyScreen.Confirm)
+                RefreshConfirm(room, lobby);
             else if (screen == LobbyScreen.Join && joinStatusText != null)
                 joinStatusText.text = joinMessage;
             else if (screen == LobbyScreen.Rematch)
@@ -192,10 +217,14 @@ namespace ChessRoyale.Networking
 
             if (room != null && room.IsConnected)
             {
+                if (createSummaryText != null && lobby != null)
+                    createSummaryText.text = lobby.MatchConfig.Summary;
                 if (!string.IsNullOrEmpty(room.DisconnectNotice))
                     createStatusText.text = room.DisconnectNotice;
                 else if (lobby != null && lobby.OpponentLeft && !lobby.MatchReady)
                     createStatusText.text = "The other player disconnected.";
+                else if (lobby != null && lobby.SeatsFilled)
+                    createStatusText.text = "Opponent joined. Waiting for them to press Ready.";
                 else if (lobby != null && lobby.LocalSeat != ChessSeat.None)
                     createStatusText.text = $"You are {ChessFusionLobbyState.SeatLabel(lobby.LocalSeat)}. Waiting for an opponent.";
                 else
@@ -207,6 +236,27 @@ namespace ChessRoyale.Networking
                 createStatusText.text = room.LastError;
             else if (busy)
                 createStatusText.text = "Creating the room...";
+        }
+
+        private void RefreshConfirm(ChessFusionRoomManager room, ChessFusionLobbyState lobby)
+        {
+            if (confirmSummaryText != null)
+            {
+                string roomCode = room != null ? room.CurrentRoomCode : "----";
+                string seat = lobby != null ? ChessFusionLobbyState.SeatLabel(lobby.LocalSeat) : "loading";
+                string summary = lobby != null ? lobby.MatchConfig.Summary : "Loading match settings...";
+                confirmSummaryText.text = $"ROOM {roomCode}\n{summary}\nYou are {seat}.";
+            }
+
+            bool canAccept = lobby != null && lobby.MatchConfig.IsSupported && lobby.LocalSeat != ChessSeat.None;
+            if (readyButton != null)
+                readyButton.interactable = canAccept && !lobby.LocalConfigurationAccepted;
+            if (confirmStatusText != null)
+                confirmStatusText.text = lobby == null || !lobby.MatchConfig.IsSupported
+                    ? "Loading match settings..."
+                    : lobby.LocalConfigurationAccepted
+                        ? "Ready. Waiting for the host to start the match."
+                        : "Review the host's settings, then press Ready.";
         }
 
         private void RefreshResult(ChessFusionLobbyState lobby, ChessRoyale.ChessGameController game)
@@ -235,10 +285,12 @@ namespace ChessRoyale.Networking
                 case ChessRoyale.ChessGameOutcome.WhiteCheckmates:
                 case ChessRoyale.ChessGameOutcome.WhiteWinsOnTime:
                 case ChessRoyale.ChessGameOutcome.WhiteWinsByDisconnect:
+                case ChessRoyale.ChessGameOutcome.WhiteWinsByThreeCheck:
                     return local == ChessRoyale.ChessPieceColor.White ? "YOU WIN" : "YOU LOSE";
                 case ChessRoyale.ChessGameOutcome.BlackCheckmates:
                 case ChessRoyale.ChessGameOutcome.BlackWinsOnTime:
                 case ChessRoyale.ChessGameOutcome.BlackWinsByDisconnect:
+                case ChessRoyale.ChessGameOutcome.BlackWinsByThreeCheck:
                     return local == ChessRoyale.ChessPieceColor.Black ? "YOU WIN" : "YOU LOSE";
                 case ChessRoyale.ChessGameOutcome.Stalemate:
                 case ChessRoyale.ChessGameOutcome.DrawInsufficientMaterial:
@@ -284,7 +336,11 @@ namespace ChessRoyale.Networking
                 createStatusText.text = "Creating the room...";
             ApplyScreen();
 
-            bool created = await room.CreateRoom(code, creatorSeatPreference);
+            ChessMatchConfig config = ChessMatchConfig.Default;
+            config.StartingLayout = (byte)pendingStartingLayout;
+            config.ThreeCheckEnabled = pendingThreeCheck;
+            config.PodiumOverviewEnabled = pendingPodiumOverview;
+            bool created = await room.CreateRoom(code, creatorSeatPreference, config);
             if (this == null || generation != flowGeneration)
                 return;
 
@@ -329,6 +385,66 @@ namespace ChessRoyale.Networking
             ApplyScreen();
         }
 
+        public void ShowRoomClosedNotice()
+        {
+            busy = false;
+            joinMessage = "The room closed because its creator left before the match started.";
+            screen = LobbyScreen.Join;
+            ApplyScreen();
+        }
+
+        public void ShowConfigure()
+        {
+            if (busy)
+                return;
+
+            screen = LobbyScreen.Configure;
+            RefreshConfigurationChoices();
+            ApplyScreen();
+        }
+
+        public void ChooseStandard()
+        {
+            pendingStartingLayout = ChessStartingLayout.Standard;
+            RefreshConfigurationChoices();
+        }
+
+        public void ChooseChess960()
+        {
+            pendingStartingLayout = ChessStartingLayout.Chess960;
+            RefreshConfigurationChoices();
+        }
+
+        public void DisableThreeCheck()
+        {
+            pendingThreeCheck = false;
+            RefreshConfigurationChoices();
+        }
+
+        public void EnableThreeCheck()
+        {
+            pendingThreeCheck = true;
+            RefreshConfigurationChoices();
+        }
+
+        public void DisablePodiumOverview()
+        {
+            pendingPodiumOverview = false;
+            RefreshConfigurationChoices();
+        }
+
+        public void EnablePodiumOverview()
+        {
+            pendingPodiumOverview = true;
+            RefreshConfigurationChoices();
+        }
+
+        public void AcceptConfiguration()
+        {
+            ChessFusionLobbyState.Instance?.RequestAcceptConfiguration();
+            RefreshConfirm(ChessFusionRoomManager.Instance, ChessFusionLobbyState.Instance);
+        }
+
         public void ChooseWhite()
         {
             SetCreatorSeatPreference(ChessSeatPreference.White);
@@ -350,7 +466,7 @@ namespace ChessRoyale.Networking
                 return;
 
             creatorSeatPreference = preference;
-            RefreshColorChoice();
+            RefreshConfigurationChoices();
         }
 
         private void RefreshColorChoice()
@@ -361,6 +477,25 @@ namespace ChessRoyale.Networking
             SetChoiceButtonColor(whiteChoiceButton, creatorSeatPreference == ChessSeatPreference.White);
             SetChoiceButtonColor(randomChoiceButton, creatorSeatPreference == ChessSeatPreference.Random);
             SetChoiceButtonColor(blackChoiceButton, creatorSeatPreference == ChessSeatPreference.Black);
+        }
+
+        private void RefreshConfigurationChoices()
+        {
+            RefreshColorChoice();
+            SetChoiceButtonColor(standardButton, pendingStartingLayout == ChessStartingLayout.Standard);
+            SetChoiceButtonColor(chess960Button, pendingStartingLayout == ChessStartingLayout.Chess960);
+            SetChoiceButtonColor(threeCheckOffButton, !pendingThreeCheck);
+            SetChoiceButtonColor(threeCheckOnButton, pendingThreeCheck);
+            SetChoiceButtonColor(arenaOffButton, !pendingPodiumOverview);
+            SetChoiceButtonColor(arenaOnButton, pendingPodiumOverview);
+            if (configureSummaryText != null)
+            {
+                ChessMatchConfig config = ChessMatchConfig.Default;
+                config.StartingLayout = (byte)pendingStartingLayout;
+                config.ThreeCheckEnabled = pendingThreeCheck;
+                config.PodiumOverviewEnabled = pendingPodiumOverview;
+                configureSummaryText.text = config.Summary;
+            }
         }
 
         private static void SetChoiceButtonColor(Button button, bool selected)
@@ -520,7 +655,9 @@ namespace ChessRoyale.Networking
         {
             bool showMenu = screen == LobbyScreen.Choose
                 || screen == LobbyScreen.Join
+                || screen == LobbyScreen.Configure
                 || screen == LobbyScreen.Create
+                || screen == LobbyScreen.Confirm
                 || screen == LobbyScreen.Rematch;
             if (canvas != null)
                 canvas.enabled = showMenu;
@@ -538,8 +675,12 @@ namespace ChessRoyale.Networking
                 chooseRoot.SetActive(screen == LobbyScreen.Choose);
             if (joinRoot != null)
                 joinRoot.SetActive(screen == LobbyScreen.Join);
+            if (configureRoot != null)
+                configureRoot.SetActive(screen == LobbyScreen.Configure);
             if (createRoot != null)
                 createRoot.SetActive(screen == LobbyScreen.Create);
+            if (confirmRoot != null)
+                confirmRoot.SetActive(screen == LobbyScreen.Confirm);
             if (rematchRoot != null)
                 rematchRoot.SetActive(screen == LobbyScreen.Rematch);
         }
@@ -564,21 +705,37 @@ namespace ChessRoyale.Networking
 
             chooseRoot = CreatePage("Choose");
             CreateText(chooseRoot.transform, "Chess Royale Online", new Vector2(0f, 410f), new Vector2(860f, 80f), 42);
-            CreateText(chooseRoot.transform, "Room creator chooses their side.", new Vector2(0f, 330f), new Vector2(860f, 60f), 28);
-            colorChoiceText = CreateText(chooseRoot.transform, "Your color: RANDOM", new Vector2(0f, 240f), new Vector2(860f, 60f), 28);
-            whiteChoiceButton = CreateButton(chooseRoot.transform, "WHITE", new Vector2(-270f, 165f), ChooseWhite, ChessUITheme.ChoiceSize);
-            randomChoiceButton = CreateButton(chooseRoot.transform, "RANDOM", new Vector2(270f, 165f), ChooseRandom, ChessUITheme.ChoiceSize);
-            blackChoiceButton = CreateButton(chooseRoot.transform, "BLACK", new Vector2(0f, 165f), ChooseBlack, ChessUITheme.ChoiceSize);
-            CreateButton(chooseRoot.transform, "CREATE", new Vector2(-160f, -75f), BeginCreate);
-            CreateButton(chooseRoot.transform, "JOIN", new Vector2(160f, -75f), ShowJoin);
-            CreateButton(chooseRoot.transform, "LEAVE", new Vector2(0f, -205f), LeaveLobbyToMenu);
-            RefreshColorChoice();
+            CreateText(chooseRoot.transform, "Create a match or join with a four-letter code.", new Vector2(0f, 315f), new Vector2(860f, 80f), 28);
+            CreateButton(chooseRoot.transform, "CREATE", new Vector2(-160f, 90f), ShowConfigure);
+            CreateButton(chooseRoot.transform, "JOIN", new Vector2(160f, 90f), ShowJoin);
+            CreateButton(chooseRoot.transform, "LEAVE", new Vector2(0f, -70f), LeaveLobbyToMenu);
+
+            configureRoot = CreatePage("Configure");
+            CreateText(configureRoot.transform, "CREATE MATCH", new Vector2(0f, 455f), new Vector2(860f, 70f), 42);
+            CreateText(configureRoot.transform, "STARTING LAYOUT", new Vector2(0f, 370f), new Vector2(860f, 50f), 24);
+            standardButton = CreateButton(configureRoot.transform, "STANDARD", new Vector2(-155f, 310f), ChooseStandard, new Vector2(280f, 68f));
+            chess960Button = CreateButton(configureRoot.transform, "CHESS960", new Vector2(155f, 310f), ChooseChess960, new Vector2(280f, 68f));
+            CreateText(configureRoot.transform, "THREE-CHECK", new Vector2(0f, 230f), new Vector2(860f, 50f), 24);
+            threeCheckOffButton = CreateButton(configureRoot.transform, "OFF", new Vector2(-155f, 170f), DisableThreeCheck, new Vector2(280f, 68f));
+            threeCheckOnButton = CreateButton(configureRoot.transform, "ON", new Vector2(155f, 170f), EnableThreeCheck, new Vector2(280f, 68f));
+            CreateText(configureRoot.transform, "PODIUM + OVERVIEW", new Vector2(0f, 90f), new Vector2(860f, 50f), 24);
+            arenaOffButton = CreateButton(configureRoot.transform, "OFF", new Vector2(-155f, 30f), DisablePodiumOverview, new Vector2(280f, 68f));
+            arenaOnButton = CreateButton(configureRoot.transform, "ON", new Vector2(155f, 30f), EnablePodiumOverview, new Vector2(280f, 68f));
+            colorChoiceText = CreateText(configureRoot.transform, "YOUR COLOR: RANDOM", new Vector2(0f, -65f), new Vector2(860f, 50f), 24);
+            whiteChoiceButton = CreateButton(configureRoot.transform, "WHITE", new Vector2(-285f, -125f), ChooseWhite, new Vector2(240f, 68f));
+            randomChoiceButton = CreateButton(configureRoot.transform, "RANDOM", new Vector2(0f, -125f), ChooseRandom, new Vector2(240f, 68f));
+            blackChoiceButton = CreateButton(configureRoot.transform, "BLACK", new Vector2(285f, -125f), ChooseBlack, new Vector2(240f, 68f));
+            configureSummaryText = CreateText(configureRoot.transform, string.Empty, new Vector2(0f, -225f), new Vector2(860f, 90f), 23);
+            CreateButton(configureRoot.transform, "CREATE ROOM", new Vector2(0f, -345f), BeginCreate, new Vector2(460f, 72f));
+            CreateButton(configureRoot.transform, "BACK", new Vector2(0f, -445f), ShowChoose, new Vector2(360f, 68f));
+            RefreshConfigurationChoices();
 
             createRoot = CreatePage("Create");
-            CreateText(createRoot.transform, "Your room code", new Vector2(0f, 180f), new Vector2(860f, 70f), 36);
-            createCodeText = CreateText(createRoot.transform, "----", new Vector2(0f, 70f), new Vector2(860f, 90f), 64);
-            createStatusText = CreateText(createRoot.transform, "Creating the room...", new Vector2(0f, -40f), new Vector2(860f, 120f), 26);
-            CreateButton(createRoot.transform, "LOBBY", new Vector2(0f, -180f), LeaveMatchToChoose);
+            CreateText(createRoot.transform, "YOUR ROOM CODE", new Vector2(0f, 315f), new Vector2(860f, 70f), 36);
+            createCodeText = CreateText(createRoot.transform, "----", new Vector2(0f, 210f), new Vector2(860f, 90f), 64);
+            createSummaryText = CreateText(createRoot.transform, string.Empty, new Vector2(0f, 70f), new Vector2(860f, 110f), 25);
+            createStatusText = CreateText(createRoot.transform, "Creating the room...", new Vector2(0f, -70f), new Vector2(860f, 140f), 26);
+            CreateButton(createRoot.transform, "LOBBY", new Vector2(0f, -230f), LeaveMatchToChoose);
 
             joinRoot = CreatePage("Join");
             CreateText(joinRoot.transform, "Join a room", new Vector2(0f, 430f), new Vector2(860f, 70f), 42);
@@ -588,13 +745,20 @@ namespace ChessRoyale.Networking
             CreateButton(joinRoot.transform, "JOIN", new Vector2(-160f, -430f), SubmitJoin);
             CreateButton(joinRoot.transform, "LOBBY", new Vector2(160f, -430f), ShowChoose);
 
+            confirmRoot = CreatePage("Confirm");
+            CreateText(confirmRoot.transform, "MATCH SETTINGS", new Vector2(0f, 360f), new Vector2(860f, 80f), 42);
+            confirmSummaryText = CreateText(confirmRoot.transform, "Loading match settings...", new Vector2(0f, 130f), new Vector2(860f, 260f), 30);
+            confirmStatusText = CreateText(confirmRoot.transform, "Review the settings, then press Ready.", new Vector2(0f, -65f), new Vector2(860f, 100f), 25);
+            readyButton = CreateButton(confirmRoot.transform, "READY", new Vector2(0f, -190f), AcceptConfiguration, new Vector2(460f, 76f));
+            CreateButton(confirmRoot.transform, "LEAVE", new Vector2(0f, -300f), LeaveMatchToChoose, new Vector2(360f, 68f));
+
             rematchRoot = CreatePage("Rematch");
             resultTitleText = CreateText(rematchRoot.transform, "YOU WIN", new Vector2(0f, 180f), new Vector2(860f, 100f), 64);
             rematchStatusText = CreateText(rematchRoot.transform, "The game is over.", new Vector2(0f, 60f), new Vector2(860f, 140f), 26);
             CreateButton(rematchRoot.transform, "REMATCH", new Vector2(0f, -70f), RequestRematch, new Vector2(460f, 72f));
             CreateButton(rematchRoot.transform, "RETURN TO LOBBY", new Vector2(0f, -170f), LeaveMatchToChoose, new Vector2(460f, 72f));
             ChessUITheme.ApplyPanel(gameObject);
-            RefreshColorChoice();
+            RefreshConfigurationChoices();
         }
 
         private GameObject CreatePage(string name)

@@ -58,6 +58,7 @@ namespace ChessRoyale
 
         public ChessPieceColor PieceColor => pieceColor;
         public ChessPieceType PieceType => pieceType;
+        public ChessPieceType StartingPieceType => startingPieceType;
         public ChessBoardSquare CurrentSquare => currentSquare;
         public ChessBoardSquare StartingSquare => startingSquare;
         public bool HasMoved => hasMoved;
@@ -334,6 +335,13 @@ namespace ChessRoyale
                 body.position = startingPosition;
                 body.rotation = startingRotation;
             }
+        }
+
+        public void ResetToSquare(ChessBoardSquare square)
+        {
+            ResetToStart();
+            if (square != null)
+                SnapToSquare(square);
         }
 
         public void SetDropHold(bool hold)
