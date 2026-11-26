@@ -24,6 +24,8 @@ namespace ChessRoyale
         private bool acceptedRayKnown;
         private Vector3 acceptedRayPosition;
         private Quaternion acceptedRayRotation;
+        private int lastWeightFrame = -1;
+        private Vector3 weightedPosition;
         private const float ImmersiveDragGain = 0.65f;
         private const float ImmersiveResponse = 18f;
 
@@ -34,6 +36,8 @@ namespace ChessRoyale
             selectingInteractor = null;
             acceptedRayKnown = false;
             lastSafePosition = grabInteractable.transform.position;
+            weightedPosition = lastSafePosition;
+            lastWeightFrame = -1;
         }
 
         public override void OnLink(XRGrabInteractable grabInteractable)
@@ -80,6 +84,7 @@ namespace ChessRoyale
                 base.Process(grabInteractable, updatePhase, ref targetPose, ref localScale);
                 aimInitialized = false;
                 targetPose.position = piece.ConstrainHeldPosition(targetPose.position);
+                targetPose.position = ApplyChaosWeight(targetPose.position);
                 lastSafePosition = targetPose.position;
                 return;
             }
@@ -132,7 +137,23 @@ namespace ChessRoyale
                 lastSmoothFrame = Time.frameCount;
             }
             lastSafePosition = piece.ConstrainHeldPosition(smoothedPosition);
+            lastSafePosition = ApplyChaosWeight(lastSafePosition);
             targetPose.position = lastSafePosition;
+        }
+
+        private Vector3 ApplyChaosWeight(Vector3 desired)
+        {
+            ChessGameController game = ChessGameController.Instance;
+            if (game == null || !game.IsChaosMode || piece == null)
+                return desired;
+
+            if (lastWeightFrame != Time.frameCount)
+            {
+                float speed = ChessModePolicies.Interaction(game.GameplayMode).MaximumFollowSpeed(piece.PieceType);
+                weightedPosition = Vector3.MoveTowards(weightedPosition, desired, speed * Time.unscaledDeltaTime);
+                lastWeightFrame = Time.frameCount;
+            }
+            return piece.ConstrainHeldPosition(weightedPosition);
         }
     }
 }

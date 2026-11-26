@@ -94,6 +94,18 @@ namespace ChessRoyale.Networking
         public static ChessFusionPlayer Local { get; private set; }
 
         public bool IsLocalPlayer => Object != null && Object.IsValid && Object.HasStateAuthority;
+        public Transform LeftHandTransform => leftHand;
+        public Transform RightHandTransform => rightHand;
+
+        public static ChessFusionPlayer FindForPlayer(PlayerRef player)
+        {
+            foreach (ChessFusionPlayer candidate in FindObjectsByType<ChessFusionPlayer>(FindObjectsSortMode.None))
+            {
+                if (candidate.Object != null && candidate.Object.IsValid && candidate.Object.InputAuthority == player)
+                    return candidate;
+            }
+            return null;
+        }
 
         public override void Spawned()
         {

@@ -19,7 +19,7 @@ MonoBehaviour:
     AppIdChat: 
     AppIdVoice: 
     AppIdVideo: 
-    AppVersion: chessroyale-1
+    AppVersion: chessroyale-2-chaos
     UseNameServer: 1
     FixedRegion: us
     Server: 

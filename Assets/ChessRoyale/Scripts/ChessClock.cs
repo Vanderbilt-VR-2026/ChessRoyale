@@ -270,6 +270,14 @@ namespace ChessRoyale
 
         private void UpdateDisplay()
         {
+            bool chaos = game != null && game.IsChaosMode;
+            if (whiteFrame != null && whiteFrame.gameObject.activeSelf == chaos)
+                whiteFrame.gameObject.SetActive(!chaos);
+            if (blackFrame != null && blackFrame.gameObject.activeSelf == chaos)
+                blackFrame.gameObject.SetActive(!chaos);
+            if (statusText != null)
+                statusText.rectTransform.anchoredPosition = chaos ? new Vector2(0f, 20f) : new Vector2(0f, -70f);
+
             int white = Mathf.CeilToInt(whiteSeconds);
             int black = Mathf.CeilToInt(blackSeconds);
             if (white != shownWhite)
@@ -302,6 +310,9 @@ namespace ChessRoyale
         {
             if (game.Outcome != ChessGameOutcome.InProgress || !InNetworkRoom)
                 return game.StatusMessage;
+
+            if (game.IsChaosMode)
+                return string.IsNullOrEmpty(game.StatusMessage) ? "Protect your king" : game.StatusMessage;
 
             ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
             if (lobby == null || lobby.LocalSeat == ChessSeat.None)

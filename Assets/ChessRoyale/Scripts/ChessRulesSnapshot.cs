@@ -23,6 +23,7 @@ namespace ChessRoyale
         public byte WhiteChecksDelivered;
         public byte BlackChecksDelivered;
         public bool ThreeCheckEnabled;
+        public byte GameplayMode;
         public byte StartingLayout;
         public int Chess960Index;
         // Zero means none; otherwise stable piece ID + 1 (safe for default snapshots).
