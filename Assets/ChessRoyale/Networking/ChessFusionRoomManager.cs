@@ -9,6 +9,7 @@ using Photon.Voice.Unity;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.XR.Interaction.Toolkit.Locomotion.Teleportation;
 
 namespace ChessRoyale.Networking
 {
@@ -58,6 +59,7 @@ namespace ChessRoyale.Networking
         private bool spawnWhenSeated;
         private bool repositionWhenSeated;
         private ChessSeatPreference creatorSeatPreference = ChessSeatPreference.Random;
+        private ChessMatchConfig creatorMatchConfig = ChessMatchConfig.Default;
         private bool wasInReadyMatch;
         private ShutdownReason lastStartFailure;
         private bool rigPoseSaved;
@@ -77,6 +79,16 @@ namespace ChessRoyale.Networking
         public void ClearDisconnectNotice()
         {
             DisconnectNotice = null;
+        }
+
+        public async void ClosePreMatchRoom()
+        {
+            if (!IsConnected)
+                return;
+
+            await LeaveRoom();
+            if (this != null)
+                FindAnyObjectByType<ChessFusionLobbyUI>()?.ShowRoomClosedNotice();
         }
 
         public bool IsConnected => runner != null && runner.IsRunning;
@@ -177,6 +189,14 @@ namespace ChessRoyale.Networking
         public Task<bool> CreateRoom(string roomCode, ChessSeatPreference seatPreference)
         {
             creatorSeatPreference = seatPreference;
+            creatorMatchConfig = ChessMatchConfig.Default;
+            return StartRoom(roomCode, createRoom: true);
+        }
+
+        public Task<bool> CreateRoom(string roomCode, ChessSeatPreference seatPreference, ChessMatchConfig config)
+        {
+            creatorSeatPreference = seatPreference;
+            creatorMatchConfig = config.IsSupported ? config : ChessMatchConfig.Default;
             return StartRoom(roomCode, createRoom: true);
         }
 
@@ -205,6 +225,9 @@ namespace ChessRoyale.Networking
             {
                 leavingIntentionally = false;
                 RestoreRigPose();
+                ClearGeneratedPodiums();
+                ClearGroundTeleportPads();
+                ChessViewToggle.Instance?.SetAvailable(true);
                 SyncNetworkPlay();
                 return;
             }
@@ -225,6 +248,9 @@ namespace ChessRoyale.Networking
                     Destroy(runnerToShutdown.gameObject);
                 leavingIntentionally = false;
                 RestoreRigPose();
+                ClearGeneratedPodiums();
+                ClearGroundTeleportPads();
+                ChessViewToggle.Instance?.SetAvailable(true);
                 SyncNetworkPlay();
             }
 
@@ -678,7 +704,7 @@ namespace ChessRoyale.Networking
             if (ChessFusionLobbyState.Instance == null)
             {
                 NetworkObject stateObject = runner.Spawn(gameStatePrefab, flags: NetworkSpawnFlags.SharedModeStateAuthMasterClient);
-                stateObject?.GetComponent<ChessFusionLobbyState>()?.ConfigureCreator(runner.LocalPlayer, creatorSeatPreference);
+                stateObject?.GetComponent<ChessFusionLobbyState>()?.ConfigureCreator(runner.LocalPlayer, creatorSeatPreference, creatorMatchConfig);
             }
 
             ChessFusionLobbyState.Instance?.RefreshAssignments();
@@ -760,10 +786,22 @@ namespace ChessRoyale.Networking
             }
 
             GetSpawnPose(white, out Vector3 position, out Quaternion rotation);
-            position = RaiseOntoPodium(white, position, rotation);
-            // Build the opponent's podium too, so their avatar is seen standing on it, not floating.
-            GetSpawnPose(!white, out Vector3 otherPosition, out Quaternion otherRotation);
-            RaiseOntoPodium(!white, otherPosition, otherRotation);
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            bool usePodiumOverview = lobby == null || lobby.MatchConfig.PodiumOverviewEnabled;
+            if (usePodiumOverview)
+            {
+                position = RaiseOntoPodium(white, position, rotation);
+                // Build the opponent's podium too, so their avatar is seen standing on it, not floating.
+                GetSpawnPose(!white, out Vector3 otherPosition, out Quaternion otherRotation);
+                RaiseOntoPodium(!white, otherPosition, otherRotation);
+                ClearGroundTeleportPads();
+            }
+            else
+            {
+                ClearGeneratedPodiums();
+                EnsureGroundTeleportPads();
+            }
+            ChessViewToggle.Instance?.SetAvailable(usePodiumOverview);
             EnsureGroundUnder(position);
             PlaceRig(origin, position, rotation);
             return origin;
@@ -811,6 +849,69 @@ namespace ChessRoyale.Networking
                 podium.GetComponent<Renderer>().sharedMaterial = daisRenderer.sharedMaterial;
 
             Physics.SyncTransforms();
+        }
+
+        public void ClearGeneratedPodiums()
+        {
+            DestroyGenerated("White Seat Podium (generated)");
+            DestroyGenerated("Black Seat Podium (generated)");
+        }
+
+        private static void DestroyGenerated(string objectName)
+        {
+            GameObject generated = GameObject.Find(objectName);
+            if (generated != null)
+                Destroy(generated);
+        }
+
+        private static void EnsureGroundTeleportPads()
+        {
+            if (GameObject.Find("Ground Teleport Pads (generated)") != null)
+                return;
+
+            ChessBoardSquare[] squares = FindObjectsByType<ChessBoardSquare>(FindObjectsSortMode.None);
+            if (squares.Length == 0)
+                return;
+
+            Bounds boardBounds = new Bounds(squares[0].Center, Vector3.zero);
+            foreach (ChessBoardSquare square in squares)
+                boardBounds.Encapsulate(square.Center);
+
+            GameObject root = new GameObject("Ground Teleport Pads (generated)");
+            Vector3[] positions =
+            {
+                new Vector3(boardBounds.center.x, boardBounds.min.y, boardBounds.min.z - 2.2f),
+                new Vector3(boardBounds.center.x, boardBounds.min.y, boardBounds.max.z + 2.2f),
+                new Vector3(boardBounds.min.x - 2.2f, boardBounds.min.y, boardBounds.center.z),
+                new Vector3(boardBounds.max.x + 2.2f, boardBounds.min.y, boardBounds.center.z),
+            };
+            Vector3[] sizes =
+            {
+                new Vector3(boardBounds.size.x + 2f, 0.08f, 2.5f),
+                new Vector3(boardBounds.size.x + 2f, 0.08f, 2.5f),
+                new Vector3(2.5f, 0.08f, boardBounds.size.z + 2f),
+                new Vector3(2.5f, 0.08f, boardBounds.size.z + 2f),
+            };
+
+            for (int index = 0; index < positions.Length; index++)
+            {
+                GameObject pad = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                pad.name = $"Ground Teleport Pad {index + 1}";
+                pad.transform.SetParent(root.transform, false);
+                pad.transform.position = positions[index];
+                pad.transform.localScale = sizes[index];
+                Renderer renderer = pad.GetComponent<Renderer>();
+                if (renderer != null)
+                    renderer.enabled = false;
+                if (pad.GetComponent<TeleportationArea>() == null)
+                    pad.AddComponent<TeleportationArea>();
+            }
+            Physics.SyncTransforms();
+        }
+
+        private static void ClearGroundTeleportPads()
+        {
+            DestroyGenerated("Ground Teleport Pads (generated)");
         }
 
         // The seats are past the ends of the board, where the only collider in the hall (the board's

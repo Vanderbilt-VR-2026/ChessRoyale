@@ -310,7 +310,13 @@ namespace ChessRoyale
             ChessPieceColor localColor = lobby.LocalSeat == ChessSeat.White
                 ? ChessPieceColor.White
                 : ChessPieceColor.Black;
-            return game.ActiveColor == localColor ? "Your turn" : "Opponent's turn";
+            string turn = game.ActiveColor == localColor ? "Your turn" : "Opponent's turn";
+            if (!game.ThreeCheckEnabled)
+                return turn;
+
+            int yours = localColor == ChessPieceColor.White ? game.WhiteChecksDelivered : game.BlackChecksDelivered;
+            int theirs = localColor == ChessPieceColor.White ? game.BlackChecksDelivered : game.WhiteChecksDelivered;
+            return $"{turn}  |  Checks {yours}-{theirs}";
         }
 
         private static string Format(int totalSeconds)

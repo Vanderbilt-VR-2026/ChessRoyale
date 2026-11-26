@@ -26,6 +26,10 @@ namespace ChessRoyale.Networking
         [Networked] public PlayerRef BlackPlayer { get; set; }
         [Networked] public NetworkBool MatchReady { get; set; }
         [Networked] public int MoveSequence { get; set; }
+        [Networked] public int RoundSequence { get; set; }
+        [Networked] public int RoundChess960Index { get; set; }
+        [Networked] public byte WhiteChecksDelivered { get; set; }
+        [Networked] public byte BlackChecksDelivered { get; set; }
         [Networked] public int ActiveColor { get; set; }
         [Networked] public int Outcome { get; set; }
         [Networked] public int PendingPromotionPieceId { get; set; }
@@ -98,7 +102,6 @@ namespace ChessRoyale.Networking
             PendingPromotionPieceId = -1;
             EnPassantSquareIndex = -1;
             EnPassantPawnId = -1;
-            PublishInitialBoard();
         }
 
         public override void Despawned(NetworkRunner runner, bool hasState)
@@ -179,9 +182,6 @@ namespace ChessRoyale.Networking
 
         public override void Render()
         {
-            if (Object != null && Object.IsValid && Object.HasStateAuthority && MoveSequence == 0)
-                PublishInitialBoard();
-
             if (MoveSequence == 0 || MoveSequence == appliedSequence)
                 return;
 
@@ -223,38 +223,50 @@ namespace ChessRoyale.Networking
             }
         }
 
-        public void PublishInitialBoard()
+        public bool BeginConfiguredMatch(ChessMatchConfig config)
         {
-            if (Object == null || !Object.IsValid || !Object.HasStateAuthority || MoveSequence != 0)
-                return;
-            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
-            ChessGameController game = ChessGameController.Instance;
-            if (lobby == null || !lobby.MatchReady || game == null || game.RegisteredPieceCount < 32)
-                return;
-
-            ClearRematchAgreement();
-            ResetClockTimes();
-            game.ResetGame();
-            CopySeatsFromLobby();
-            WriteSnapshot(game);
-            RPC_RepositionPlayers();
-        }
-
-        public void RestartMatch()
-        {
-            if (Object == null || !Object.IsValid || !Object.HasStateAuthority)
-                return;
-
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority || MoveSequence != 0 || !config.IsSupported)
+                return false;
             ChessGameController game = ChessGameController.Instance;
             if (game == null || game.RegisteredPieceCount < 32)
-                return;
+                return false;
 
+            RoundSequence++;
+            RoundChess960Index = config.StartingLayout == (byte)ChessStartingLayout.Chess960
+                ? Random.Range(0, 960)
+                : 0;
             ClearRematchAgreement();
             ResetClockTimes();
-            game.ResetGame();
+            game.ResetGame(config, RoundChess960Index);
             CopySeatsFromLobby();
             WriteSnapshot(game);
             RPC_RepositionPlayers();
+            return true;
+        }
+
+        public bool RestartMatch()
+        {
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority)
+                return false;
+
+            ChessFusionLobbyState lobby = ChessFusionLobbyState.Instance;
+            ChessGameController game = ChessGameController.Instance;
+            if (lobby == null || !lobby.MatchConfig.IsSupported || game == null || game.RegisteredPieceCount < 32)
+                return false;
+
+            RoundSequence++;
+            if (lobby.MatchConfig.StartingLayout == (byte)ChessStartingLayout.Chess960)
+                RoundChess960Index = (RoundChess960Index + Random.Range(1, 960)) % 960;
+            else
+                RoundChess960Index = 0;
+            ClearRematchAgreement();
+            ResetClockTimes();
+            game.ResetGame(lobby.MatchConfig, RoundChess960Index);
+            CopySeatsFromLobby();
+            WriteSnapshot(game);
+            lobby.MarkRematchPlaying();
+            RPC_RepositionPlayers();
+            return true;
         }
 
         public void PublishDisconnect(ChessPieceColor disconnected)
@@ -281,12 +293,12 @@ namespace ChessRoyale.Networking
 
         public void RequestMove(byte requestId, byte pieceId, sbyte originSquare, sbyte destinationSquare)
         {
-            RPC_RequestMove(requestId, pieceId, originSquare, destinationSquare);
+            RPC_RequestMove(RoundSequence, requestId, pieceId, originSquare, destinationSquare);
         }
 
         public void RequestPromotion(byte requestId, byte pieceId, byte promotionType)
         {
-            RPC_RequestPromotion(requestId, pieceId, promotionType);
+            RPC_RequestPromotion(RoundSequence, requestId, pieceId, promotionType);
         }
 
         public void RequestReset()
@@ -295,8 +307,14 @@ namespace ChessRoyale.Networking
         }
 
         [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-        private void RPC_RequestMove(byte requestId, byte pieceId, sbyte originSquare, sbyte destinationSquare, RpcInfo info = default)
+        private void RPC_RequestMove(int roundSequence, byte requestId, byte pieceId, sbyte originSquare, sbyte destinationSquare, RpcInfo info = default)
         {
+            if (roundSequence != RoundSequence)
+            {
+                Reject(info.Source, requestId, pieceId, "That move belongs to an earlier round.");
+                return;
+            }
+
             ChessGameController game = ChessGameController.Instance;
             if (!TryValidateSender(info.Source, out ChessPieceColor seat, out string error))
             {
@@ -343,8 +361,14 @@ namespace ChessRoyale.Networking
         }
 
         [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
-        private void RPC_RequestPromotion(byte requestId, byte pieceId, byte promotionType, RpcInfo info = default)
+        private void RPC_RequestPromotion(int roundSequence, byte requestId, byte pieceId, byte promotionType, RpcInfo info = default)
         {
+            if (roundSequence != RoundSequence)
+            {
+                Reject(info.Source, requestId, pieceId, "That promotion belongs to an earlier round.");
+                return;
+            }
+
             ChessGameController game = ChessGameController.Instance;
             if (!TryValidateSender(info.Source, out ChessPieceColor seat, out string error))
             {
@@ -407,7 +431,6 @@ namespace ChessRoyale.Networking
             if (!WhiteRematch || !BlackRematch)
                 return;
 
-            ClearRematchAgreement();
             RestartMatch();
         }
 
@@ -544,6 +567,8 @@ namespace ChessRoyale.Networking
             EnPassantSquareIndex = snapshot.EnPassantSquareIndex;
             EnPassantPawnId = snapshot.EnPassantPawnId;
             HalfmoveClock = snapshot.HalfmoveClock;
+            WhiteChecksDelivered = snapshot.WhiteChecksDelivered;
+            BlackChecksDelivered = snapshot.BlackChecksDelivered;
             LastWhiteMove = snapshot.LastWhiteMove;
             LastBlackMove = snapshot.LastBlackMove;
             if (snapshot.Pieces != null)
@@ -566,10 +591,15 @@ namespace ChessRoyale.Networking
 
             latestSnapshot = snapshot;
             MoveSequence++;
+            if (snapshot.Outcome != ChessGameOutcome.InProgress)
+                ChessFusionLobbyState.Instance?.MarkMatchEnded();
         }
 
         private ChessRulesSnapshot ReadSnapshot()
         {
+            ChessMatchConfig config = ChessFusionLobbyState.Instance != null
+                ? ChessFusionLobbyState.Instance.MatchConfig
+                : ChessMatchConfig.Default;
             ChessPieceSnapshot[] pieces = new ChessPieceSnapshot[32];
             for (int index = 0; index < 32; index++)
             {
@@ -594,6 +624,11 @@ namespace ChessRoyale.Networking
                 EnPassantSquareIndex = (sbyte)EnPassantSquareIndex,
                 EnPassantPawnId = (sbyte)EnPassantPawnId,
                 HalfmoveClock = HalfmoveClock,
+                WhiteChecksDelivered = WhiteChecksDelivered,
+                BlackChecksDelivered = BlackChecksDelivered,
+                ThreeCheckEnabled = config.ThreeCheckEnabled,
+                StartingLayout = config.StartingLayout,
+                Chess960Index = RoundChess960Index,
                 LastWhiteMove = LastWhiteMove,
                 LastBlackMove = LastBlackMove,
             };

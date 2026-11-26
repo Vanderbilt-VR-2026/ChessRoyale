@@ -30,8 +30,28 @@ namespace ChessRoyale.Networking
         [Networked] public NetworkBool OpponentLeft { get; set; }
         [Networked] public PlayerRef CreatorPlayer { get; set; }
         [Networked] public int CreatorSeatPreference { get; set; }
+        [Networked] public ChessMatchConfig MatchConfig { get; set; }
+        [Networked] public int MatchPhaseValue { get; set; }
+        [Networked] public int WhiteAcceptedRevision { get; set; }
+        [Networked] public int BlackAcceptedRevision { get; set; }
 
         public static ChessFusionLobbyState Instance { get; private set; }
+
+        public ChessMatchPhase MatchPhase => (ChessMatchPhase)MatchPhaseValue;
+        public bool SeatsFilled => WhitePlayer != PlayerRef.None && BlackPlayer != PlayerRef.None;
+        public bool LocalConfigurationAccepted
+        {
+            get
+            {
+                if (Runner == null)
+                    return false;
+                if (Runner.LocalPlayer == WhitePlayer)
+                    return WhiteAcceptedRevision == MatchConfig.Revision;
+                if (Runner.LocalPlayer == BlackPlayer)
+                    return BlackAcceptedRevision == MatchConfig.Revision;
+                return false;
+            }
+        }
 
         public ChessSeat LocalSeat
         {
@@ -73,6 +93,10 @@ namespace ChessRoyale.Networking
             if (Object == null || !Object.IsValid || !Object.HasStateAuthority || Runner == null)
                 return;
 
+            CloseIfCreatorLeftBeforeStart();
+            if (creatorCloseSent)
+                return;
+
             PlayerRef white = IsActive(WhitePlayer) ? WhitePlayer : PlayerRef.None;
             PlayerRef black = IsActive(BlackPlayer) ? BlackPlayer : PlayerRef.None;
 
@@ -94,34 +118,58 @@ namespace ChessRoyale.Networking
                     black = player;
             }
 
-            bool ready = white != PlayerRef.None && black != PlayerRef.None;
-            bool becameReady = ready && !MatchReady;
-            if (MatchReady && !ready)
-                OpponentLeft = true;
-            if (ready)
-                OpponentLeft = false;
-
             PlayerRef previousWhite = WhitePlayer;
             PlayerRef previousBlack = BlackPlayer;
+            if (previousWhite != white)
+                WhiteAcceptedRevision = 0;
+            if (previousBlack != black)
+                BlackAcceptedRevision = 0;
+
             WhitePlayer = white;
             BlackPlayer = black;
+
+            if (MatchPhase == ChessMatchPhase.Configuring && CreatorPlayer != PlayerRef.None)
+            {
+                if (white == CreatorPlayer)
+                    WhiteAcceptedRevision = MatchConfig.Revision;
+                if (black == CreatorPlayer)
+                    BlackAcceptedRevision = MatchConfig.Revision;
+            }
+
+            bool seatsFilled = white != PlayerRef.None && black != PlayerRef.None;
+            bool ready = seatsFilled && MatchPhase != ChessMatchPhase.Configuring;
+            if (MatchReady && !seatsFilled)
+                OpponentLeft = true;
+            if (seatsFilled)
+                OpponentLeft = false;
+
             MatchReady = ready;
             ChessNetworkGameState state = ChessNetworkGameState.Instance;
             state?.SetSeats(white, black, ready);
             state?.ClearRematchForChangedSeat(previousWhite, white, previousBlack, black);
-            state?.UpdateReconnectWindow(white, black, ready);
-            if (becameReady && state != null && state.MoveSequence == 0)
-                state.PublishInitialBoard();
+            state?.UpdateReconnectWindow(white, black, seatsFilled);
+            TryStartConfiguredMatch();
         }
 
-        public void ConfigureCreator(PlayerRef creator, ChessSeatPreference preference)
+        public void ConfigureCreator(PlayerRef creator, ChessSeatPreference preference, ChessMatchConfig config)
         {
             if (Object == null || !Object.IsValid || !Object.HasStateAuthority || MatchReady)
                 return;
 
+            if (!config.IsSupported)
+            {
+                Debug.LogError("The requested Chess Royale match configuration is not supported by this build.", this);
+                return;
+            }
+
             if (preference == ChessSeatPreference.Random)
                 preference = Random.value < 0.5f ? ChessSeatPreference.White : ChessSeatPreference.Black;
 
+            config.Revision = Mathf.Max(1, config.Revision);
+            MatchConfig = config;
+            MatchPhaseValue = (int)ChessMatchPhase.Configuring;
+            WhiteAcceptedRevision = 0;
+            BlackAcceptedRevision = 0;
             CreatorPlayer = creator;
             CreatorSeatPreference = (int)preference;
             if (WhitePlayer == creator)
@@ -129,6 +177,60 @@ namespace ChessRoyale.Networking
             if (BlackPlayer == creator)
                 BlackPlayer = PlayerRef.None;
             RefreshAssignments();
+        }
+
+        public void RequestAcceptConfiguration()
+        {
+            RPC_AcceptConfiguration(MatchConfig.Revision);
+        }
+
+        [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+        private void RPC_AcceptConfiguration(int acceptedRevision, RpcInfo info = default)
+        {
+            if (MatchPhase != ChessMatchPhase.Configuring || acceptedRevision != MatchConfig.Revision)
+                return;
+
+            if (info.Source == WhitePlayer)
+                WhiteAcceptedRevision = acceptedRevision;
+            else if (info.Source == BlackPlayer)
+                BlackAcceptedRevision = acceptedRevision;
+            else
+                return;
+
+            TryStartConfiguredMatch();
+        }
+
+        private void TryStartConfiguredMatch()
+        {
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority ||
+                MatchPhase != ChessMatchPhase.Configuring || !SeatsFilled || !MatchConfig.IsSupported ||
+                WhiteAcceptedRevision != MatchConfig.Revision || BlackAcceptedRevision != MatchConfig.Revision)
+                return;
+
+            ChessNetworkGameState state = ChessNetworkGameState.Instance;
+            if (state == null || !state.BeginConfiguredMatch(MatchConfig))
+                return;
+
+            MatchPhaseValue = (int)ChessMatchPhase.Playing;
+            MatchReady = true;
+            state.SetSeats(WhitePlayer, BlackPlayer, true);
+        }
+
+        public void MarkMatchEnded()
+        {
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority || MatchPhase != ChessMatchPhase.Playing)
+                return;
+
+            MatchPhaseValue = (int)ChessMatchPhase.Ended;
+        }
+
+        public void MarkRematchPlaying()
+        {
+            if (Object == null || !Object.IsValid || !Object.HasStateAuthority)
+                return;
+
+            MatchPhaseValue = (int)ChessMatchPhase.Playing;
+            MatchReady = SeatsFilled;
         }
 
         private bool IsActive(PlayerRef player)
@@ -143,6 +245,23 @@ namespace ChessRoyale.Networking
             }
 
             return false;
+        }
+
+        private bool creatorCloseSent;
+
+        private void CloseIfCreatorLeftBeforeStart()
+        {
+            if (creatorCloseSent || MatchPhase != ChessMatchPhase.Configuring || CreatorPlayer == PlayerRef.None || IsActive(CreatorPlayer))
+                return;
+
+            creatorCloseSent = true;
+            RPC_ClosePreMatchRoom();
+        }
+
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        private void RPC_ClosePreMatchRoom()
+        {
+            ChessFusionRoomManager.Instance?.ClosePreMatchRoom();
         }
 
         public static string SeatLabel(ChessSeat seat)

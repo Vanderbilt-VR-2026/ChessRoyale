@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using ChessRoyale.AI;
+using ChessRoyale.Networking;
 using UnityEngine;
 
 namespace ChessRoyale
@@ -18,6 +19,8 @@ namespace ChessRoyale
         BlackWinsOnTime,
         WhiteWinsByDisconnect,
         BlackWinsByDisconnect,
+        WhiteWinsByThreeCheck,
+        BlackWinsByThreeCheck,
     }
 
     [DisallowMultipleComponent]
@@ -67,6 +70,14 @@ namespace ChessRoyale
         private ChessPieceColor networkSeatColor;
         private bool executingAiMove;
         private ChessPieceType aiPromotionType = ChessPieceType.Queen;
+        private bool threeCheckEnabled;
+        private byte whiteChecksDelivered;
+        private byte blackChecksDelivered;
+        private ChessStartingLayout startingLayout;
+        private int chess960Index;
+        private int castlingKingStartFile = 4;
+        private int castlingQueenRookStartFile = 0;
+        private int castlingKingRookStartFile = 7;
 
         private static bool IsSinglePlayer => !MainMenu.LaunchMultiplayer;
 
@@ -107,6 +118,9 @@ namespace ChessRoyale
         public string StatusMessage => statusMessage;
         public int RegisteredPieceCount => pieces.Count;
         public bool IsPromotionPending => pendingPromotionPiece != null;
+        public bool ThreeCheckEnabled => threeCheckEnabled;
+        public byte WhiteChecksDelivered => whiteChecksDelivered;
+        public byte BlackChecksDelivered => blackChecksDelivered;
 
         private void Awake()
         {
@@ -242,6 +256,15 @@ namespace ChessRoyale
             HashSet<ChessBoardSquare> moves = GetLegalMoves(piece);
             if (!moves.Contains(destination))
                 return false;
+
+            if (startingLayout == ChessStartingLayout.Chess960 &&
+                TryResolveChess960Castle(piece, destination, out ChessPieceInteractable castleKing,
+                    out ChessPieceInteractable castleRook, out ChessBoardSquare kingDestination,
+                    out ChessBoardSquare rookDestination))
+            {
+                ExecuteChess960Castle(castleKing, castleRook, kingDestination, rookDestination);
+                return true;
+            }
 
             ChessBoardSquare origin = piece.CurrentSquare;
             bool pawnMove = piece.PieceType == ChessPieceType.Pawn;
@@ -429,6 +452,11 @@ namespace ChessRoyale
                 EnPassantSquareIndex = EnPassantSquareIndex,
                 EnPassantPawnId = EnPassantPawnId,
                 HalfmoveClock = halfmoveClock,
+                WhiteChecksDelivered = whiteChecksDelivered,
+                BlackChecksDelivered = blackChecksDelivered,
+                ThreeCheckEnabled = threeCheckEnabled,
+                StartingLayout = (byte)startingLayout,
+                Chess960Index = chess960Index,
                 LastWhiteMove = lastWhiteMove,
                 LastBlackMove = lastBlackMove,
             };
@@ -467,6 +495,12 @@ namespace ChessRoyale
                 ? DescribeOutcome(snapshot.Outcome, snapshot.ActiveColor)
                 : snapshot.StatusMessage;
             halfmoveClock = snapshot.HalfmoveClock;
+            threeCheckEnabled = snapshot.ThreeCheckEnabled;
+            whiteChecksDelivered = snapshot.WhiteChecksDelivered;
+            blackChecksDelivered = snapshot.BlackChecksDelivered;
+            startingLayout = (ChessStartingLayout)snapshot.StartingLayout;
+            chess960Index = snapshot.Chess960Index;
+            ConfigureCastlingOrigins();
             pendingPromotionPiece = snapshot.PendingPromotionPieceId >= 0
                 ? FindPiece((byte)snapshot.PendingPromotionPieceId)
                 : null;
@@ -487,6 +521,11 @@ namespace ChessRoyale
 
         public void ResetGame()
         {
+            ResetGame(ChessMatchConfig.Default, 0);
+        }
+
+        public void ResetGame(ChessMatchConfig config, int roundChess960Index)
+        {
             lastWhiteMove = lastBlackMove = 0;
             RefreshLastMoveOutlines();
             ClearMoveHints();
@@ -499,20 +538,166 @@ namespace ChessRoyale
             enPassantTargetSquare = null;
             enPassantVulnerablePawn = null;
             halfmoveClock = 0;
+            threeCheckEnabled = config.ThreeCheckEnabled;
+            whiteChecksDelivered = 0;
+            blackChecksDelivered = 0;
+            startingLayout = (ChessStartingLayout)config.StartingLayout;
+            chess960Index = Mathf.Clamp(roundChess960Index, 0, 959);
+            ConfigureCastlingOrigins();
             positionCounts.Clear();
             if (promotionPanel != null)
                 promotionPanel.SetActive(false);
 
+            if (startingLayout == ChessStartingLayout.Chess960)
+                ResetToChess960Position();
+            else
+                ResetToStandardPosition();
+
+            RecordCurrentPosition();
+            RefreshTurnInteraction();
+            GameReset?.Invoke();
+        }
+
+        private void ResetToStandardPosition()
+        {
             foreach (ChessPieceInteractable piece in pieces)
             {
                 piece.ResetToStart();
                 if (piece.CurrentSquare != null)
                     board[piece.CurrentSquare] = piece;
             }
+        }
 
-            RecordCurrentPosition();
-            RefreshTurnInteraction();
-            GameReset?.Invoke();
+        private void ResetToChess960Position()
+        {
+            ChessPieceType[] backRank = GenerateChess960BackRank(chess960Index);
+            foreach (ChessPieceColor color in new[] { ChessPieceColor.White, ChessPieceColor.Black })
+            {
+                int backRankIndex = color == ChessPieceColor.White ? 0 : 7;
+                int pawnRankIndex = color == ChessPieceColor.White ? 1 : 6;
+                foreach (ChessPieceType type in new[]
+                         {
+                             ChessPieceType.Rook, ChessPieceType.Knight, ChessPieceType.Bishop,
+                             ChessPieceType.Queen, ChessPieceType.King,
+                         })
+                {
+                    List<ChessPieceInteractable> matchingPieces = pieces.FindAll(piece =>
+                        piece.PieceColor == color && piece.StartingPieceType == type && piece.StartingSquare != null &&
+                        piece.StartingSquare.RankIndex == backRankIndex);
+                    matchingPieces.Sort((left, right) => left.PieceId.CompareTo(right.PieceId));
+
+                    List<int> matchingFiles = new List<int>();
+                    for (int file = 0; file < 8; file++)
+                    {
+                        if (backRank[file] == type)
+                            matchingFiles.Add(file);
+                    }
+
+                    for (int index = 0; index < matchingPieces.Count && index < matchingFiles.Count; index++)
+                    {
+                        ChessBoardSquare square = GetSquare(matchingFiles[index], backRankIndex);
+                        matchingPieces[index].ResetToSquare(square);
+                        board[square] = matchingPieces[index];
+                    }
+                }
+
+                foreach (ChessPieceInteractable pawn in pieces.FindAll(piece =>
+                             piece.PieceColor == color && piece.StartingPieceType == ChessPieceType.Pawn))
+                {
+                    int file = pawn.StartingSquare != null ? pawn.StartingSquare.FileIndex : pawn.PieceId & 7;
+                    ChessBoardSquare square = GetSquare(file, pawnRankIndex);
+                    pawn.ResetToSquare(square);
+                    board[square] = pawn;
+                }
+            }
+        }
+
+        private void ConfigureCastlingOrigins()
+        {
+            castlingKingStartFile = 4;
+            castlingQueenRookStartFile = 0;
+            castlingKingRookStartFile = 7;
+            if (startingLayout != ChessStartingLayout.Chess960)
+                return;
+
+            ChessPieceType[] backRank = GenerateChess960BackRank(chess960Index);
+            for (int file = 0; file < 8; file++)
+            {
+                if (backRank[file] == ChessPieceType.King)
+                    castlingKingStartFile = file;
+            }
+
+            for (int file = 0; file < castlingKingStartFile; file++)
+            {
+                if (backRank[file] == ChessPieceType.Rook)
+                    castlingQueenRookStartFile = file;
+            }
+            for (int file = castlingKingStartFile + 1; file < 8; file++)
+            {
+                if (backRank[file] == ChessPieceType.Rook)
+                {
+                    castlingKingRookStartFile = file;
+                    break;
+                }
+            }
+        }
+
+        public static ChessPieceType[] GenerateChess960BackRank(int positionIndex)
+        {
+            int value = Mathf.Clamp(positionIndex, 0, 959);
+            ChessPieceType[] result = new ChessPieceType[8];
+            bool[] occupied = new bool[8];
+
+            int bishopOne = (value % 4) * 2 + 1;
+            value /= 4;
+            int bishopTwo = (value % 4) * 2;
+            value /= 4;
+            result[bishopOne] = ChessPieceType.Bishop;
+            result[bishopTwo] = ChessPieceType.Bishop;
+            occupied[bishopOne] = occupied[bishopTwo] = true;
+
+            int queenSlot = value % 6;
+            value /= 6;
+            int queenFile = NthEmptyFile(occupied, queenSlot);
+            result[queenFile] = ChessPieceType.Queen;
+            occupied[queenFile] = true;
+
+            int[,] knightPairs =
+            {
+                { 0, 1 }, { 0, 2 }, { 0, 3 }, { 0, 4 }, { 1, 2 },
+                { 1, 3 }, { 1, 4 }, { 2, 3 }, { 2, 4 }, { 3, 4 },
+            };
+            int firstKnightFile = NthEmptyFile(occupied, knightPairs[value, 0]);
+            result[firstKnightFile] = ChessPieceType.Knight;
+            occupied[firstKnightFile] = true;
+            int secondKnightSlot = knightPairs[value, 1] - (knightPairs[value, 1] > knightPairs[value, 0] ? 1 : 0);
+            int secondKnightFile = NthEmptyFile(occupied, secondKnightSlot);
+            result[secondKnightFile] = ChessPieceType.Knight;
+            occupied[secondKnightFile] = true;
+
+            int[] remaining = new int[3];
+            int remainingCount = 0;
+            for (int file = 0; file < 8; file++)
+            {
+                if (!occupied[file])
+                    remaining[remainingCount++] = file;
+            }
+            result[remaining[0]] = ChessPieceType.Rook;
+            result[remaining[1]] = ChessPieceType.King;
+            result[remaining[2]] = ChessPieceType.Rook;
+            return result;
+        }
+
+        private static int NthEmptyFile(bool[] occupied, int slot)
+        {
+            for (int file = 0; file < occupied.Length; file++)
+            {
+                if (occupied[file])
+                    continue;
+                if (slot-- == 0)
+                    return file;
+            }
+            return 0;
         }
 
         // Called by the chess clock when a side runs out of time; the other side wins.
@@ -563,6 +748,9 @@ namespace ChessRoyale
                     legal.Add(destination);
             }
 
+            if (startingLayout == ChessStartingLayout.Chess960)
+                AddChess960CastlingRequests(piece, legal);
+
             return legal;
         }
 
@@ -595,7 +783,8 @@ namespace ChessRoyale
                         AddIfAvailable(piece, origin.FileIndex + direction.x, origin.RankIndex + direction.y, moves);
                     foreach (Vector2Int direction in StraightDirections)
                         AddIfAvailable(piece, origin.FileIndex + direction.x, origin.RankIndex + direction.y, moves);
-                    AddCastlingMoves(piece, moves);
+                    if (startingLayout != ChessStartingLayout.Chess960)
+                        AddCastlingMoves(piece, moves);
                     break;
             }
 
@@ -703,6 +892,121 @@ namespace ChessRoyale
             if (transit != null && destination != null &&
                 !IsSquareAttacked(transit, enemy) && !IsSquareAttacked(destination, enemy))
                 moves.Add(destination);
+        }
+
+        private void AddChess960CastlingRequests(ChessPieceInteractable piece, HashSet<ChessBoardSquare> moves)
+        {
+            if (piece.PieceType != ChessPieceType.King && piece.PieceType != ChessPieceType.Rook)
+                return;
+
+            for (int side = 0; side < 2; side++)
+            {
+                bool kingSide = side == 1;
+                if (!TryGetChess960Castle(piece.PieceColor, kingSide, out ChessPieceInteractable king,
+                        out ChessPieceInteractable rook, out ChessBoardSquare kingDestination,
+                        out ChessBoardSquare rookDestination))
+                    continue;
+
+                if (piece == king && king.CurrentSquare != kingDestination)
+                    moves.Add(kingDestination);
+                else if (piece == rook && king.CurrentSquare == kingDestination && rook.CurrentSquare != rookDestination)
+                    moves.Add(rookDestination);
+            }
+        }
+
+        private bool TryResolveChess960Castle(ChessPieceInteractable requestedPiece, ChessBoardSquare requestedDestination,
+            out ChessPieceInteractable king, out ChessPieceInteractable rook, out ChessBoardSquare kingDestination,
+            out ChessBoardSquare rookDestination)
+        {
+            for (int side = 0; side < 2; side++)
+            {
+                bool kingSide = side == 1;
+                if (!TryGetChess960Castle(requestedPiece.PieceColor, kingSide, out king, out rook,
+                        out kingDestination, out rookDestination))
+                    continue;
+
+                if ((requestedPiece == king && king.CurrentSquare != kingDestination && requestedDestination == kingDestination) ||
+                    (requestedPiece == rook && king.CurrentSquare == kingDestination &&
+                     rook.CurrentSquare != rookDestination && requestedDestination == rookDestination))
+                    return true;
+            }
+
+            king = null;
+            rook = null;
+            kingDestination = null;
+            rookDestination = null;
+            return false;
+        }
+
+        private bool TryGetChess960Castle(ChessPieceColor color, bool kingSide,
+            out ChessPieceInteractable king, out ChessPieceInteractable rook,
+            out ChessBoardSquare kingDestination, out ChessBoardSquare rookDestination)
+        {
+            int rank = color == ChessPieceColor.White ? 0 : 7;
+            ChessBoardSquare kingOrigin = GetSquare(castlingKingStartFile, rank);
+            ChessBoardSquare rookOrigin = GetSquare(kingSide ? castlingKingRookStartFile : castlingQueenRookStartFile, rank);
+            kingDestination = GetSquare(kingSide ? 6 : 2, rank);
+            rookDestination = GetSquare(kingSide ? 5 : 3, rank);
+            king = null;
+            rook = null;
+
+            if (kingOrigin == null || rookOrigin == null || kingDestination == null || rookDestination == null ||
+                !board.TryGetValue(kingOrigin, out king) || !board.TryGetValue(rookOrigin, out rook) ||
+                king.PieceColor != color || king.PieceType != ChessPieceType.King || king.HasMoved ||
+                rook.PieceColor != color || rook.PieceType != ChessPieceType.Rook || rook.HasMoved)
+                return false;
+
+            if (!PathClearForCastle(kingOrigin.FileIndex, kingDestination.FileIndex, rank, king, rook) ||
+                !PathClearForCastle(rookOrigin.FileIndex, rookDestination.FileIndex, rank, king, rook))
+                return false;
+
+            ChessPieceColor enemy = Opposite(color);
+            int direction = kingDestination.FileIndex == kingOrigin.FileIndex
+                ? 0
+                : (kingDestination.FileIndex > kingOrigin.FileIndex ? 1 : -1);
+            int file = kingOrigin.FileIndex;
+            while (true)
+            {
+                ChessBoardSquare transit = GetSquare(file, rank);
+                if (transit == null || IsSquareAttacked(transit, enemy))
+                    return false;
+                if (file == kingDestination.FileIndex)
+                    break;
+                file += direction;
+            }
+
+            return king.CurrentSquare != kingDestination || rook.CurrentSquare != rookDestination;
+        }
+
+        private bool PathClearForCastle(int originFile, int destinationFile, int rank,
+            ChessPieceInteractable king, ChessPieceInteractable rook)
+        {
+            int minimum = Mathf.Min(originFile, destinationFile);
+            int maximum = Mathf.Max(originFile, destinationFile);
+            for (int file = minimum; file <= maximum; file++)
+            {
+                ChessBoardSquare square = GetSquare(file, rank);
+                if (square == null)
+                    return false;
+                if (board.TryGetValue(square, out ChessPieceInteractable occupant) && occupant != king && occupant != rook)
+                    return false;
+            }
+            return true;
+        }
+
+        private void ExecuteChess960Castle(ChessPieceInteractable king, ChessPieceInteractable rook,
+            ChessBoardSquare kingDestination, ChessBoardSquare rookDestination)
+        {
+            board.Remove(king.CurrentSquare);
+            board.Remove(rook.CurrentSquare);
+            board[kingDestination] = king;
+            board[rookDestination] = rook;
+            king.MoveToSquare(kingDestination);
+            rook.MoveToSquare(rookDestination);
+            MarkLastMove(king);
+            enPassantTargetSquare = null;
+            enPassantVulnerablePawn = null;
+            CompleteTurn(king, false, false);
         }
 
         private static bool IsCapturableEnemy(ChessPieceInteractable piece, ChessPieceInteractable occupant)
@@ -861,8 +1165,31 @@ namespace ChessRoyale
         {
             halfmoveClock = pawnMove || wasCapture ? 0 : halfmoveClock + 1;
             activeColor = Opposite(activeColor);
+            bool deliveredCheck = false;
+            ChessBoardSquare defendingKing = FindKingSquare(activeColor);
+            if (threeCheckEnabled && defendingKing != null && IsSquareAttacked(defendingKing, movedPiece.PieceColor))
+            {
+                deliveredCheck = true;
+                if (movedPiece.PieceColor == ChessPieceColor.White)
+                    whiteChecksDelivered = (byte)Mathf.Min(3, whiteChecksDelivered + 1);
+                else
+                    blackChecksDelivered = (byte)Mathf.Min(3, blackChecksDelivered + 1);
+            }
             RecordCurrentPosition();
-            EvaluateGameState();
+            if (deliveredCheck && (whiteChecksDelivered >= 3 || blackChecksDelivered >= 3))
+            {
+                outcome = whiteChecksDelivered >= 3
+                    ? ChessGameOutcome.WhiteWinsByThreeCheck
+                    : ChessGameOutcome.BlackWinsByThreeCheck;
+                statusMessage = whiteChecksDelivered >= 3
+                    ? "White wins by delivering three checks"
+                    : "Black wins by delivering three checks";
+                ClearCheckSignal();
+            }
+            else
+            {
+                EvaluateGameState();
+            }
             RefreshTurnInteraction();
         }
 
@@ -994,6 +1321,10 @@ namespace ChessRoyale
                     return "Black disconnected. White wins.";
                 case ChessGameOutcome.BlackWinsByDisconnect:
                     return "White disconnected. Black wins.";
+                case ChessGameOutcome.WhiteWinsByThreeCheck:
+                    return "White wins by delivering three checks";
+                case ChessGameOutcome.BlackWinsByThreeCheck:
+                    return "Black wins by delivering three checks";
                 default:
                     return $"{sideToMove} to move";
             }
@@ -1118,22 +1449,24 @@ namespace ChessRoyale
             key.Append('|').Append(activeColor == ChessPieceColor.White ? 'w' : 'b');
             key.Append('|').Append(CastlingRightsKey());
             key.Append('|').Append(enPassantTargetSquare != null ? enPassantTargetSquare.Coordinate : "-");
+            if (threeCheckEnabled)
+                key.Append('|').Append(whiteChecksDelivered).Append(':').Append(blackChecksDelivered);
             return key.ToString();
         }
 
         private string CastlingRightsKey()
         {
             StringBuilder rights = new StringBuilder(4);
-            AppendCastlingRight(rights, ChessPieceColor.White, 0, 7, 'K');
-            AppendCastlingRight(rights, ChessPieceColor.White, 0, 0, 'Q');
-            AppendCastlingRight(rights, ChessPieceColor.Black, 7, 7, 'k');
-            AppendCastlingRight(rights, ChessPieceColor.Black, 7, 0, 'q');
+            AppendCastlingRight(rights, ChessPieceColor.White, 0, castlingKingRookStartFile, 'K');
+            AppendCastlingRight(rights, ChessPieceColor.White, 0, castlingQueenRookStartFile, 'Q');
+            AppendCastlingRight(rights, ChessPieceColor.Black, 7, castlingKingRookStartFile, 'k');
+            AppendCastlingRight(rights, ChessPieceColor.Black, 7, castlingQueenRookStartFile, 'q');
             return rights.Length > 0 ? rights.ToString() : "-";
         }
 
         private void AppendCastlingRight(StringBuilder rights, ChessPieceColor color, int rank, int rookFile, char symbol)
         {
-            ChessBoardSquare kingSquare = GetSquare(4, rank);
+            ChessBoardSquare kingSquare = GetSquare(castlingKingStartFile, rank);
             ChessBoardSquare rookSquare = GetSquare(rookFile, rank);
             if (kingSquare != null && rookSquare != null &&
                 board.TryGetValue(kingSquare, out ChessPieceInteractable king) &&
